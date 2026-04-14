@@ -1,59 +1,124 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 from pyomo.environ import *
 
-# 파일 분리 모듈 임포트
+# 모듈 로드
 from optimization import solve_production_plan
-from ai_engine import get_ai_response, get_risk_analysis
+from ai_engine import get_ai_consultant, get_risk_analysis
 
-st.set_page_config(page_title="S&OP AI Control Tower", layout="wide")
+# 1. 페이지 설정
+st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
+st.title("🚜 원예장비 AI 총괄생산계획 시스템")
 
-# [세션 상태 관리]
-if 'res' not in st.session_state: st.session_state.res = None
+# 2. 세션 상태 초기화
 if 'messages' not in st.session_state: st.session_state.messages = []
+if 'res_model' not in st.session_state: st.session_state.res_model = None
+if 'utils' not in st.session_state: st.session_state.utils = []
 
-# --- 사이드바 (모든 입력 유지) ---
+# 3. 사이드바 (기존 기능 통합)
 with st.sidebar:
-    st.header("⚙️ 생산 제약 설정")
-    opt_mode = st.radio("알고리즘", ["IP", "LP"])
-    domain = NonNegativeIntegers if opt_mode == "IP" else NonNegativeReals
-    enable_sub = st.toggle("외주 허용", value=True)
-    
+    st.header("🎮 시스템 제어판")
+    opt_mode = st.radio("알고리즘 선택", ["정수계획법(IP)", "선형계획법(LP)"])
+    domain_type = NonNegativeIntegers if "IP" in opt_mode else NonNegativeReals
+
     st.markdown("---")
-    demand_raw = st.text_input("수요 예측 (6개월)", "1600, 3000, 3200, 3800, 2200, 2200")
-    demand = [float(d.strip()) for d in demand_raw.split(",")]
+    st.subheader("🏭 공급망 전략")
+    enable_sub = st.toggle("외주 하청(Outsourcing) 허용", value=True)
+
+    st.markdown("---")
+    st.subheader("🔮 AI 수요 시나리오")
+    trend = st.selectbox("시장 트렌드", ["평시", "호황", "불황", "봄철 수요 폭증"])
+    demand_raw = st.text_input("6개월 수요 예측 (쉼표 구분)", "1600, 3000, 3200, 3800, 2200, 2200")
     
-    # AI 수요 보정 버튼 (ai_engine 활용)
-    if st.button("🪄 AI 수요 최적화 제안"):
-        suggestion = get_ai_response(f"수요 {demand_raw}를 시장 호황에 맞춰 보정해줘.", "데이터 분석")
-        st.success(suggestion)
+    if st.button("🪄 AI에게 수요 보정 요청"):
+        ai_suggestion = get_ai_consultant(f"현재 수요 {demand_raw}를 {trend} 상황에 맞춰 숫자 6개로만 보정해줘.", "수요 예측")
+        st.info(f"AI 추천: {ai_suggestion}")
 
-    # 나머지 비용 설정 (기존과 동일)
-    v_c_reg = st.number_input("정규 임금", value=640)
-    # ... (기존 비용 입력 코드들) ...
+    st.markdown("---")
+    st.subheader("⏱️ 공정 효율 및 비용 설정")
+    std_time = st.slider("제품당 표준 작업 시간 (Hr)", 1.0, 10.0, 4.0)
+    working_days = st.slider("월간 가동 일수", 1, 30, 20)
+    ot_limit = st.slider("인당 월간 초과근무 제한 (Hr)", 0, 30, 10)
 
-# --- 메인 화면 (탭 구성) ---
-tab1, tab2, tab3 = st.tabs(["📊 대시보드", "📉 리스크 분석", "💬 AI 상담"])
+    v_c_reg = st.number_input("정규 임금 (인/월)", value=640)
+    v_c_ot  = st.number_input("초과 근무 수당 (Hr)", value=6)
+    v_c_h   = st.number_input("신규 고용 비용 (인)", value=300)
+    v_c_l   = st.number_input("해고 비용 (인)", value=500)
+    v_c_inv = st.number_input("재고 유지비 (개/월)", value=2)
+    v_c_sub = st.number_input("외주 하청 비용 (개당)", value=30)
+    v_c_mat = st.number_input("재료비 (개당)", value=10)
+    v_c_back= st.number_input("부재고 비용 (개/월)", value=5)
+
+    v_w_init = st.number_input("현재 근로자 수", value=80)
+    v_i_init = st.number_input("현재고 수준", value=1000)
+    v_i_final = st.number_input("기말 목표 재고", value=500)
+
+# 데이터 리스트화
+demand = [float(d.strip()) for d in demand_raw.split(",")]
+
+# 4. 메인 대시보드 UI
+tab1, tab2, tab3 = st.tabs(["📊 운영 대시보드", "📉 리스크 분석", "💬 AI 전략 상담방"])
 
 with tab1:
-    if st.button("🚀 최적 생산계획 수립"):
-        m, sol = solve_production_plan(demand, domain, v_c_reg, 6, 300, 500, 2, 5, 10, 30, 4.0, 20, 10, 80, 1000, 500, enable_sub)
-        st.session_state.res = m
-        st.session_state.utils = [(m.P[t]() * 4.0 / (8 * 20 * m.W[t]()) * 100) for t in range(1, 7)]
-        st.toast("최적화 완료!")
+    if st.button("🚀 최적 생산계획 수립 실행"):
+        with st.spinner('최적화 계산 중...'):
+            m, sol = solve_production_plan(demand, domain_type, v_c_reg, v_c_ot, v_c_h, v_c_l, v_c_inv, v_c_back, v_c_mat, v_c_sub, std_time, working_days, ot_limit, v_w_init, v_i_init, v_i_final, enable_sub)
+            
+            if m and sol.solver.termination_condition == TerminationCondition.optimal:
+                st.session_state.res_model = m
+                st.session_state.utils = [(m.P[t]() * std_time / (8 * working_days * m.W[t]()) * 100) if m.W[t]() > 0 else 0 for t in range(1, 7)]
+                st.toast("✅ 최적화 성공!")
+            else:
+                st.error("❌ 최적해를 찾지 못했습니다. 제약 조건을 조정하세요.")
 
-    if st.session_state.res:
-        m = st.session_state.res
-        st.metric("총 비용", f"{m.cost():,.0f}k")
-        # Plotly 차트 시각화 (기존 코드 그대로 적용)
+    if st.session_state.res_model:
+        m = st.session_state.res_model
+        # KPI 메트릭
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("총 운영 비용", f"{m.cost():,.0f}k")
+        k2.metric("평균 가동률", f"{sum(st.session_state.utils)/6:.1f}%")
+        k3.metric("인력 변동 수", f"{sum(m.H[t]() + m.L[t]() for t in range(1,7)):.0f}명")
+        k4.metric("기말 재고량", f"{m.I[6]():,.0f}ea")
+
+        # 시각화 차트
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=list(range(1,7)), y=[m.P[t]() for t in range(1,7)], name="자체 생산", marker_color='royalblue'))
+        fig.add_trace(go.Bar(x=list(range(1,7)), y=[m.C[t]() for t in range(1,7)], name="외주 하청", marker_color='lightslategray'))
+        fig.add_trace(go.Scatter(x=list(range(1,7)), y=demand, name="예상 수요", line=dict(color='crimson', dash='dash')))
+        fig.add_trace(go.Scatter(x=list(range(1,7)), y=[m.I[t]() for t in range(1,7)], name="재고 수준", yaxis="y2", line=dict(color='orange')))
+        fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', title="월별 통합 생산 흐름")
+        st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    if st.session_state.res:
-        st.subheader("🚩 AI 리스크 진단")
-        st.warning(get_risk_analysis(st.session_state.utils))
-        st.line_chart(st.session_state.utils)
+    if st.session_state.res_model:
+        st.subheader("🚩 AI 리스크 진단 보고")
+        risk_text = get_risk_analysis(st.session_state.utils, enable_sub)
+        st.warning(risk_text)
+        
+        fig_u = px.area(x=list(range(1,7)), y=st.session_state.utils, title="생산 가동률 추이 (%)", markers=True)
+        fig_u.add_hline(y=100, line_dash="dot", line_color="red")
+        st.plotly_chart(fig_u, use_container_width=True)
 
 with tab3:
-    st.subheader("💬 AI 경영 컨설턴트")
-    # 채팅 인터페이스 (get_ai_response 활용)
+    st.subheader("💬 AI 전략 상담방")
+    if st.button("📄 AI 경영 요약 보고서 생성"):
+        if st.session_state.res_model:
+            m = st.session_state.res_model
+            report = get_ai_consultant("현재 계획의 핵심 성과와 개선점을 경영진 보고용으로 요약해줘.", f"총비용:{m.cost():,.0f}, 가동률:{st.session_state.utils}")
+            st.success(report)
+            
+    st.markdown("---")
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]): st.markdown(msg["content"])
+
+    if prompt := st.chat_input("계획에 대해 질문하세요."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): st.markdown(prompt)
+        
+        ctx = f"총비용:{st.session_state.res_model.cost():,.0f}, 외주사용:{enable_sub}" if st.session_state.res_model else "데이터 없음"
+        with st.chat_message("assistant"):
+            res = get_ai_consultant(prompt, ctx)
+            st.markdown(res)
+            st.session_state.messages.append({"role": "assistant", "content": res})
