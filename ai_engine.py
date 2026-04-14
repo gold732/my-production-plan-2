@@ -13,7 +13,7 @@ def get_ai_consultant(prompt, context_summary):
     for key in available_keys:
         try:
             genai.configure(api_key=key)
-            model = genai.GenerativeModel('gemini-2.0-flash-lite')
+            model = genai.GenerativeModel('gemini-2.5-flash-lite')
             
             system_instruction = f"""1. 당신은 생산관리 전문가입니다. 데이터 분석 결과({context_summary})를 토대로 답변하세요.
                                    2. 전문적인 용어를 사용하되, 답변은 간결하고 명확해야 합니다.
