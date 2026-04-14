@@ -76,4 +76,56 @@ with tab1:
         fig.add_trace(go.Bar(x=list(range(1,7)), y=[m.C[t]() for t in range(1,7)], name="외주하청", marker_color='gray'))
         fig.add_trace(go.Scatter(x=list(range(1,7)), y=demand, name="수요", line=dict(color='red', dash='dash')))
         fig.add_trace(go.Scatter(x=list(range(1,7)), y=[m.I[t]() for t in range(1,7)], name="재고", yaxis="y2", line=dict(color='orange')))
-        fig.update_layout(yaxis2=dict(overlaying='y', side
+        fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', title="월별 통합 생산 흐름")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 3. 하단 상세 분석 (기존 복구 그래프 2종)
+        col_l, col_r = st.columns(2)
+        with col_l:
+            st.subheader("💰 비용 세부 구성")
+            c_vals = {
+                "노무비": sum(v_c_reg*m.W[t]() for t in range(1,7)), 
+                "재료비": sum(v_c_mat*m.P[t]() for t in range(1,7)), 
+                "외주비": sum(v_c_sub*m.C[t]() for t in range(1,7)), 
+                "기타/재고": m.cost() - sum((v_c_reg*m.W[t]() + v_c_mat*m.P[t]() + v_c_sub*m.C[t]()) for t in range(1,7))
+            }
+            st.plotly_chart(px.pie(names=list(c_vals.keys()), values=list(c_vals.values()), hole=0.4), use_container_width=True)
+        
+        with col_r:
+            st.subheader("👷 월별 인력 운영 현황")
+            worker_df = pd.DataFrame({"월": list(range(1,7)), "인원": [m.W[t]() for t in range(1,7)]})
+            st.line_chart(worker_df.set_index("월"))
+
+with tab2:
+    if st.session_state.res:
+        st.subheader("🚩 AI 생산 리스크 진단")
+        st.warning(get_risk_analysis(st.session_state.utils, enable_sub))
+        st.line_chart(st.session_state.utils)
+
+with tab3:
+    st.subheader("💬 AI 전략 상담방")
+    if st.button("🧹 대화 초기화"):
+        st.session_state.messages = []
+        st.rerun()
+    
+    if st.button("📄 핵심 요약 보고서 생성"):
+        if st.session_state.res:
+            report = get_ai_consultant("계획 핵심 성과 요약해.", f"비용:{st.session_state.res.cost():,.0f}")
+            st.success(report)
+
+    st.markdown("---")
+    # 채팅 인터페이스 구현부
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if prompt := st.chat_input("계획에 대해 질문하세요."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        ctx = f"비용:{st.session_state.res.cost():,.0f}, 외주:{enable_sub}" if st.session_state.res else "데이터 없음"
+        with st.chat_message("assistant"):
+            res = get_ai_consultant(prompt, ctx)
+            st.markdown(res)
+            st.session_state.messages.append({"role": "assistant", "content": res})
