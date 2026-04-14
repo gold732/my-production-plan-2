@@ -20,7 +20,7 @@ if 'res' not in st.session_state:
 if 'utils' not in st.session_state:
     st.session_state.utils = []
 
-# --- 3. 사이드바 영역 (모든 조절 파라미터 복구) ---
+# --- 3. 사이드바 영역 (모든 조절 파라미터 100% 복구) ---
 with st.sidebar:
     st.header("🎮 시스템 제어판")
     opt_mode = st.radio("알고리즘 선택", ["정수계획법(IP)", "선형계획법(LP)"])
@@ -36,7 +36,8 @@ with st.sidebar:
     demand_raw = st.text_input("6개월 수요 예측 (쉼표 구분)", "1600, 3000, 3200, 3800, 2200, 2200")
     
     if st.button("🪄 AI에게 수요 보정 요청"):
-        ai_suggestion = get_ai_consultant(f"현재 수요 {demand_raw}를 {trend} 상황에 맞춰 숫자 6개로만 보정해줘.", "수요 예측")
+        # 수요 보정은 'demand' 모드로 설정하여 숫자만 출력
+        ai_suggestion = get_ai_consultant(f"현재 수요 {demand_raw}를 {trend} 상황에 맞춰 보정해.", "수요 예측", mode="demand")
         st.success(f"AI 추천: {ai_suggestion}")
 
     st.markdown("---")
@@ -47,7 +48,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("💰 운영 비용 설정 (천원)")
-    # 모든 비용 파라미터 입력창 복구
+    # 모든 비용 파라미터 입력창 완벽 복구
     v_c_reg = st.number_input("정규 임금 (인/월)", value=640)
     v_c_ot  = st.number_input("초과 근무 수당 (Hr)", value=6)
     v_c_h   = st.number_input("신규 고용 비용 (인)", value=300)
@@ -84,24 +85,29 @@ with tab1:
     if st.session_state.res:
         m = st.session_state.res
         
-        # KPI 지표
+        # KPI 지표 상단 카드
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("총 운영 비용", f"{m.cost():,.0f}k")
         k2.metric("평균 가동률", f"{sum(st.session_state.utils)/6:.1f}%")
         k3.metric("인력 변동 수", f"{sum(m.H[t]() + m.L[t]() for t in range(1,7)):.0f}명")
         k4.metric("기말 재고량", f"{m.I[6]():,.0f}ea")
 
-        # 메인 차트
+        # 메인 시각화 차트
         fig = go.Figure()
         fig.add_trace(go.Bar(x=list(range(1,7)), y=[m.P[t]() for t in range(1,7)], name="자체 생산", marker_color='royalblue'))
         fig.add_trace(go.Bar(x=list(range(1,7)), y=[m.C[t]() for t in range(1,7)], name="외주 하청", marker_color='lightslategray'))
         fig.add_trace(go.Scatter(x=list(range(1,7)), y=demand, name="예상 수요", line=dict(color='crimson', dash='dash')))
         fig.add_trace(go.Scatter(x=list(range(1,7)), y=[m.I[t]() for t in range(1,7)], name="재고 수준", yaxis="y2", line=dict(color='orange')))
         
-        fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', title="월별 통합 생산 및 재고 흐름")
+        fig.update_layout(
+            yaxis2=dict(overlaying='y', side='right'), 
+            barmode='stack', 
+            title="월별 통합 생산 및 재고 흐름",
+            hovermode="x unified"
+        )
         st.plotly_chart(fig, use_container_width=True)
 
-        # 하단 그래프 2종 (복구)
+        # 하단 상세 그래프 2종 복구
         col_l, col_r = st.columns(2)
         with col_l:
             st.subheader("💰 비용 세부 구성")
@@ -115,29 +121,50 @@ with tab1:
             
         with col_r:
             st.subheader("👷 월별 인력 운영 현황")
-            st.line_chart(pd.DataFrame({"인원": [m.W[t]() for t in range(1, 7)]}, index=range(1,7)))
+            worker_trend = pd.DataFrame({"인원": [m.W[t]() for t in range(1, 7)]}, index=range(1,7))
+            st.line_chart(worker_trend)
 
 with tab2:
     if st.session_state.res:
+        st.subheader("🚩 AI 생산 리스크 진단")
+        # 리스크 분석은 전문가 상담 모드(consult)로 실행
         st.warning(get_risk_analysis(st.session_state.utils, enable_sub))
+        
+        st.subheader("📉 월별 가동률 추이 (%)")
         st.line_chart(pd.DataFrame({"가동률": st.session_state.utils}, index=range(1,7)))
 
 with tab3:
     st.subheader("💬 AI 전략 상담방")
-    if st.button("📄 핵심 요약 보고서 생성"):
-        if st.session_state.res:
-            st.success(get_ai_consultant("계획 성과 요약해.", f"비용:{st.session_state.res.cost():,.0f}"))
+    
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("🧹 대화 내용 초기화"):
+            st.session_state.messages = []
+            st.rerun()
+    with col_btn2:
+        if st.button("📄 전문 경영 보고서 생성"):
+            if st.session_state.res:
+                # 보고서 생성은 풍부한 상담 모드(consult)로 실행
+                report = get_ai_consultant("현재 계획의 성과와 전략적 개선점을 보고서 형식으로 작성해줘.", f"총 비용: {st.session_state.res.cost():,.0f}k", mode="consult")
+                st.success(report)
 
     st.markdown("---")
+    
+    # 대화 기록 표시
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]): st.markdown(msg["content"])
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-    if prompt := st.chat_input("질문하세요."):
+    # 채팅 입력창
+    if prompt := st.chat_input("생산 전략에 대해 질문하세요."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
+        with st.chat_message("user"):
+            st.markdown(prompt)
         
         ctx = f"비용:{st.session_state.res.cost():,.0f}, 가동률:{st.session_state.utils}" if st.session_state.res else "데이터 없음"
+        
         with st.chat_message("assistant"):
-            res = get_ai_consultant(prompt, ctx)
+            # 일반 상담 역시 풍부한 응답 모드(consult)로 실행
+            res = get_ai_consultant(prompt, ctx, mode="consult")
             st.markdown(res)
             st.session_state.messages.append({"role": "assistant", "content": res})
