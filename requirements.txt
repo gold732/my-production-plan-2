@@ -1,0 +1,5 @@
+streamlit
+pyomo
+pandas
+plotly
+google-generativeai
