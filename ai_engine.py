@@ -2,30 +2,18 @@ import google.generativeai as genai
 import streamlit as st
 import random
 
-def get_ai_consultant(prompt, context_summary):
-    """생산관리 전문가 페르소나를 가진 AI 상담 기능"""
+def get_ai_response(prompt, context):
     keys = st.secrets.get("GEMINI_KEYS", [])
-    if not keys: return "⚠️ Secrets에 'GEMINI_KEYS'를 설정해주세요."
-    available_keys = list(keys)
-    random.shuffle(available_keys)
+    if not keys: return "⚠️ API 키 설정 필요"
     
-    for key in available_keys:
-        try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel('gemini-2.0-flash-lite')
-            
-            system_instruction = f"""
-            1. 당신은 생산관리 전문가입니다. 데이터 기반으로 답변하세요: {context_summary}
-            2. 전문 용어를 사용하되 간결하게 답변하세요.
-            3. 데이터 외의 질문은 거절하세요.
-            """
-            response = model.generate_content(system_instruction + "\n\n사용자 질문: " + prompt)
-            return response.text
-        except: continue 
-    return "❌ AI 연결 실패"
+    genai.configure(api_key=random.choice(keys))
+    model = genai.GenerativeModel('gemini-2.5-flash-lite')
+    
+    instruction = f"당신은 S&OP 전문가입니다. 다음 데이터를 참고하여 답변하세요: {context}"
+    response = model.generate_content(instruction + "\n\n질문: " + prompt)
+    return response.text
 
-def analyze_risks(utils):
-    """가동률 데이터를 분석하여 병목 리스크 진단"""
-    ctx = f"월별 가동률 추이: {utils}"
-    prompt = "가동률이 95%를 넘거나 60% 미만인 달의 리스크를 분석하고 대응책을 한 문장으로 제시해줘."
-    return get_ai_consultant(prompt, ctx)
+def get_risk_analysis(utils):
+    ctx = f"월별 가동률: {utils}"
+    prompt = "현재 가동률을 보고 생산 병목 리스크를 1문장으로 진단해줘."
+    return get_ai_response(prompt, ctx)
