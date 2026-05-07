@@ -65,7 +65,7 @@ def render_sidebar():
     return demand, enable_sub, std_time, working_days, ot_limit
 
 def render_supply_demand_tab(m, utils, demand):
-    """1번 탭: AI 진단 보고서와 고해상도 공급망 차트 복구"""
+    """1번 탭: AI 진단 보고서와 고해상도 공급망 차트"""
     if st.session_state.get('ai_analysis'):
         analysis = st.session_state['ai_analysis']
         st.markdown("### 🤖 AI 전문 컨설턴트 종합 진단 보고서")
@@ -80,7 +80,11 @@ def render_supply_demand_tab(m, utils, demand):
 
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("총 운영 비용", f"{m.cost():,.0f}k")
-    k2.metric("평균 가동률", f"{sum(utils)/len(utils):.1f}%")
+    
+    # 가동률 경고 표시 (100% 인접 시 빨간색 표시)
+    avg_u = sum(utils)/len(utils)
+    k2.metric("평균 가동률", f"{avg_u:.1f}%", delta="-Burnout 위험" if avg_u > 95 else None, delta_color="inverse")
+    
     k3.metric("인력 고용/해고", f"+{sum(m.H[t]() for t in range(1,len(demand)+1)):.0f} / -{sum(m.L[t]() for t in range(1,len(demand)+1)):.0f}명")
     k4.metric("총 부재고", f"{sum(m.S[t]() for t in range(1,len(demand)+1)):,.0f}ea")
 
@@ -97,7 +101,6 @@ def render_supply_demand_tab(m, utils, demand):
     fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
-    # [🚨 복구]: 고해상도 인력 배치 동태 차트
     st.subheader("👷 인력 최적 배치 및 고용/해고 트렌드")
     worker_counts = [int(m.W[t]()) for t in range(1, len(demand) + 1)]
     hired = [int(m.H[t]()) for t in range(1, len(demand) + 1)]
@@ -124,7 +127,11 @@ def render_risk_efficiency_tab(m, utils, demand):
     with c2:
         st.markdown("##### ⚠️ 생산 가동률 변동 추이")
         fig_u = px.area(x=[f"{t}월" for t in range(1,len(demand)+1)], y=utils, markers=True, labels={'y':'가동률 (%)','x':'월'})
-        fig_u.add_hline(y=st.session_state.get('max_util', 100), line_dash="dot", line_color="red", annotation_text="상한 제한선")
+        # 100% 라인 강조
+        fig_u.add_hline(y=100, line_dash="solid", line_color="darkred", annotation_text="절대 한계선 (100%)")
+        max_limit = st.session_state.get('max_util', 100)
+        if max_limit < 100:
+            fig_u.add_hline(y=max_limit, line_dash="dot", line_color="orange", annotation_text="설정 상한")
         st.plotly_chart(fig_u, use_container_width=True)
 
     st.markdown("---")
