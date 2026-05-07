@@ -43,9 +43,17 @@ if 'v_w_init' not in st.session_state: st.session_state['v_w_init'] = 80
 if 'v_i_init' not in st.session_state: st.session_state['v_i_init'] = 1000
 if 'v_i_final' not in st.session_state: st.session_state['v_i_final'] = 500
 
-# 각 파라미터별 고정(Lock) 제어 상태 초기화 등록
+# 초기 앱 구동 시 무조건 고정(체크 활성화)되어야 하는 보안 변수 목록 명시
+initial_locked_keys = {
+    'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 
+    'v_c_mat', 'v_c_back', 'std_time', 'opt_mode', 'enable_sub'
+}
+
+# 각 파라미터별 고정(Lock) 제어 상태 초기화 등록 및 강제 고정 주입
 for pk in param_keys:
-    if f"lock_{pk}" not in st.session_state: st.session_state[f"lock_{pk}"] = False
+    if f"lock_{pk}" not in st.session_state: 
+        st.session_state[f"lock_{pk}"] = (pk in initial_locked_keys)
+        
 if "lock_demand_raw" not in st.session_state:
     st.session_state["lock_demand_raw"] = False
 
