@@ -21,7 +21,6 @@ def render_sidebar():
         st.markdown("---")
         st.subheader("⏱️ 공정 효율 및 제약")
         c1, c2 = st.columns([3, 1])
-        # [🚨 요구사항 반영]: 숫자로 직접 입력받도록 변경
         with c1: std_time = st.number_input("제품당 표준 작업 시간 (Hr)", min_value=1.0, max_value=10.0, step=0.1, key="std_time")
         with c2: st.checkbox("고정", key="lock_std_time")
         
@@ -66,11 +65,8 @@ def render_sidebar():
         with c1: demand_raw = st.text_input("수요 예측 (쉼표 구분)", key="demand_raw")
         with c2: st.checkbox("고정", key="lock_demand_raw")
         
-        # [🚨 ValueError 해결]: 빈 문자열을 걸러내어 float 변환 시 터지지 않게 보강
-        try:
-            demand = [float(d.strip()) for d in demand_raw.split(",") if d.strip()]
-        except:
-            demand = [0.0] * 6 # 파싱 실패 시 기본값 폴백
+        # [🚨 ValueError 가드]: 공백 및 콤마 오타 필터링
+        demand = [float(d.strip()) for d in demand_raw.split(",") if d.strip()]
         
         init_fields = [("v_w_init", "근로자수"), ("v_i_init", "현재고"), ("v_i_final", "목표재고")]
         for k, label in init_fields:
@@ -81,12 +77,12 @@ def render_sidebar():
     return demand, enable_sub, std_time, working_days, ot_limit
 
 def render_supply_demand_tab(m, utils, demand):
-    """공급망 운영 전용 탭"""
+    """1번 탭: 공급망 운영 가시성 (물리적 흐름)"""
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("총 운영 비용", f"{m.cost():,.0f}k")
     k2.metric("평균 가동률", f"{sum(utils)/len(utils):.1f}%")
-    k3.metric("인력 변동 (고용/해고)", f"+{sum(m.H[t]() for t in range(1,len(demand)+1)):.0f} / -{sum(m.L[t]() for t in range(1,len(demand)+1)):.0f}명")
-    k4.metric("총 부재고 리스크", f"{sum(m.S[t]() for t in range(1,len(demand)+1)):,.0f}ea")
+    k3.metric("인력 변동", f"+{sum(m.H[t]() for t in range(1,len(demand)+1)):.0f} / -{sum(m.L[t]() for t in range(1,len(demand)+1)):.0f}명")
+    k4.metric("총 부재고", f"{sum(m.S[t]() for t in range(1,len(demand)+1)):,.0f}ea")
 
     st.subheader("📊 생산/수요/재고 통합 흐름")
     fig = go.Figure()
@@ -96,51 +92,62 @@ def render_supply_demand_tab(m, utils, demand):
     fig.add_trace(go.Scatter(x=list(range(1,len(demand)+1)), y=demand, name="예상 수요", line=dict(color='darkorange', dash='dash')))
     fig.add_trace(go.Scatter(x=list(range(1,len(demand)+1)), y=[m.I[t]() for t in range(1,len(demand)+1)], name="재고 수준", yaxis="y2", line=dict(color='green', width=2.5)))
     
-    current_min_inv = st.session_state.get('min_inv', 0.0)
-    if current_min_inv > 0:
-        fig.add_hline(y=current_min_inv, line_dash="dot", line_color="#27AE60", annotation_text="최소 재고선", yref="y2")
+    # 안전 재고 가이드 시각화
+    min_i = st.session_state.get('min_inv', 0.0)
+    if min_i > 0:
+        fig.add_hline(y=min_i, line_dash="dot", line_color="#27AE60", annotation_text="최소 재고 가이드", yref="y2")
+    
     fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
 def render_risk_efficiency_tab(m, utils, demand):
-    """리스크/효율성 분석 전용 탭"""
-    st.subheader("📉 운영 리스크 진단")
+    """2번 탭: 리스크 및 비용 효율성 진단"""
+    st.subheader("📉 운영 리스크 및 효율성 종합 진단")
     c1, c2 = st.columns(2)
+    
     with c1:
         st.markdown("##### 💰 세부 비용 구조")
         v = st.session_state
         costs = {
             "노무비": sum(v['v_c_reg']*m.W[t]() + v['v_c_ot']*m.O[t]() for t in range(1,len(demand)+1)),
-            "변동비": sum(v['v_c_h']*m.H[t]() + v['v_c_l']*m.L[t]() for t in range(1,len(demand)+1)),
+            "인사비": sum(v['v_c_h']*m.H[t]() + v['v_c_l']*m.L[t]() for t in range(1,len(demand)+1)),
             "재고비": sum(v['v_c_inv']*m.I[t]() + v['v_c_back']*m.S[t]() for t in range(1,len(demand)+1)),
             "생산비": sum(v['v_c_mat']*m.P[t]() + v['v_c_sub']*m.C[t]() for t in range(1,len(demand)+1))
         }
         st.plotly_chart(px.pie(names=list(costs.keys()), values=list(costs.values()), hole=0.4), use_container_width=True)
+        
     with c2:
         st.markdown("##### ⚠️ 생산 가동률 추이")
-        fig = px.area(x=list(range(1,len(demand)+1)), y=utils, markers=True)
-        fig.add_hline(y=st.session_state.get('max_util', 100), line_dash="dot", line_color="red")
-        st.plotly_chart(fig, use_container_width=True)
+        fig_u = px.area(x=[f"{t}월" for t in range(1,len(demand)+1)], y=utils, title="가동률 (%)", markers=True)
+        fig_u.add_hline(y=st.session_state.get('max_util', 100), line_dash="dot", line_color="red", annotation_text="상한선")
+        st.plotly_chart(fig_u, use_container_width=True)
 
     st.markdown("---")
     c3, c4 = st.columns(2)
+    
     with c3:
         st.markdown("##### ⏳ 인력 과로 위험 (잔업 잠식률)")
         ot_lim = v.get('ot_limit', 10)
         burn_rates = [((m.O[t]() / (ot_lim * m.W[t]())) * 100 if m.W[t]() > 0 and ot_lim > 0 else 0) for t in range(1, len(demand)+1)]
-        st.plotly_chart(px.bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=burn_rates, marker_color='#E74C3C'), use_container_width=True)
+        # [🚨 TypeError 해결]: marker_color 대신 color_discrete_sequence 사용
+        fig_ot = px.bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=burn_rates, color_discrete_sequence=['#E74C3C'])
+        fig_ot.update_layout(yaxis_title="잠식률 (%)")
+        st.plotly_chart(fig_ot, use_container_width=True)
+        
     with c4:
-        st.markdown("##### 💸 개당 노무 원가 효율성")
+        st.markdown("##### 💸 단위 노무비 효율")
         unit_c = [((v['v_c_reg']*m.W[t]() + v['v_c_ot']*m.O[t]())/m.P[t]() if m.P[t]() > 0 else 0) for t in range(1, len(demand)+1)]
-        st.plotly_chart(px.line(x=[f"{t}월" for t in range(1,len(demand)+1)], y=unit_c, markers=True), use_container_width=True)
+        fig_unit = px.line(x=[f"{t}월" for t in range(1,len(demand)+1)], y=unit_c, markers=True, color_discrete_sequence=['#8E44AD'])
+        fig_unit.update_layout(yaxis_title="천원/ea")
+        st.plotly_chart(fig_unit, use_container_width=True)
 
 def render_data_master_tab(m, utils, demand):
-    """정밀 데이터 마스터 탭"""
-    st.subheader("📋 정밀 데이터 명세 시트")
+    """3번 탭: 정밀 데이터 마스터 (Excel 호환 표)"""
+    st.subheader("📋 총괄생산계획 정밀 명세 데이터")
     ds = []
     for t in range(1, len(demand) + 1):
         ds.append({
-            "월": f"{t}월", "수요": demand[t-1], "생산": m.P[t](), "외주": m.C[t](), 
-            "인력": m.W[t](), "재고": m.I[t](), "부재고": m.S[t](), "가동률": f"{utils[t-1]:.1f}%"
+            "월": f"{t}월", "예상수요": demand[t-1], "자체생산": m.P[t](), "외주하청": m.C[t](), 
+            "인력수": m.W[t](), "연장근로(Hr)": m.O[t](), "재고량": m.I[t](), "부재고": m.S[t](), "가동률": f"{utils[t-1]:.1f}%"
         })
     st.dataframe(pd.DataFrame(ds).set_index("월"), use_container_width=True)
