@@ -8,7 +8,6 @@ from ui_components import render_sidebar, render_metrics_and_charts, render_risk
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
-# [🚨 변경] 'max_cost' 파라미터 제어 키 추가 매핑
 param_keys = ['opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit', 'max_util', 'min_inv', 'max_cost',
               'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub',
               'v_w_init', 'v_i_init', 'v_i_final']
@@ -29,7 +28,6 @@ if 'working_days' not in st.session_state: st.session_state['working_days'] = 20
 if 'ot_limit' not in st.session_state: st.session_state['ot_limit'] = 10
 if 'max_util' not in st.session_state: st.session_state['max_util'] = 100.0
 if 'min_inv' not in st.session_state: st.session_state['min_inv'] = 0.0
-# [🚨 신규 추가] 초기 총 비용 상한값 설정 (충분히 큰 상한선으로 초기화)
 if 'max_cost' not in st.session_state: st.session_state['max_cost'] = 99999999.0
 if 'v_c_reg' not in st.session_state: st.session_state['v_c_reg'] = 640
 if 'v_c_ot' not in st.session_state: st.session_state['v_c_ot'] = 6
@@ -44,17 +42,20 @@ if 'v_w_init' not in st.session_state: st.session_state['v_w_init'] = 80
 if 'v_i_init' not in st.session_state: st.session_state['v_i_init'] = 1000
 if 'v_i_final' not in st.session_state: st.session_state['v_i_final'] = 500
 
+# [🚨 변경] 사용자의 요구사항에 따라 지정된 변수들을 초기 잠금 명부에 추가 주입 완료
 initial_locked_keys = {
     'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 
-    'v_c_mat', 'v_c_back', 'std_time', 'opt_mode', 'enable_sub'
+    'v_c_mat', 'v_c_back', 'std_time', 'opt_mode', 'enable_sub',
+    'v_i_final', 'max_util', 'min_inv', 'max_cost'
 }
 
 for pk in param_keys:
     if f"lock_{pk}" not in st.session_state: 
         st.session_state[f"lock_{pk}"] = (pk in initial_locked_keys)
         
+# [🚨 변경] 수요 예측 텍스트 인풋 필드도 초기 구동 시 강제 고정(True) 상태로 설정
 if "lock_demand_raw" not in st.session_state:
-    st.session_state["lock_demand_raw"] = False
+    st.session_state["lock_demand_raw"] = True
 
 if 'messages' not in st.session_state: st.session_state.messages = []
 if 'success' not in st.session_state: st.session_state['success'] = False
@@ -72,7 +73,6 @@ def run_optimization_process():
         current_demand = [float(d.strip()) for d in st.session_state['demand_raw'].split(",")]
         current_domain = NonNegativeIntegers if "IP" in st.session_state['opt_mode'] else NonNegativeReals
         
-        # [🚨 변경] solve_production_plan 인자에 st.session_state['max_cost'] 추가 연동
         model, sol = solve_production_plan(
             current_demand, current_domain, 
             st.session_state['v_c_reg'], st.session_state['v_c_ot'], 
