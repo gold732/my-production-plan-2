@@ -216,7 +216,7 @@ with tab1:
         
         w_min, w_max = min(worker_counts), max(worker_counts)
         margin = max(2, int((w_max - w_min) * 0.5)) if w_max != w_min else 5
-        fig_worker.update_layout(yaxis=dict(range=[w_min - margin, w_max + margin], dtick=1, title="인원 수 (명)"), xaxis=dict(title="분석 대상 월"), hovermode="x unified"||)
+        fig_worker.update_layout(yaxis=dict(range=[w_min - margin, w_max + margin], dtick=1, title="인원 수 (명)"), xaxis=dict(title="분석 대상 월"), hovermode="x unified")
         st.plotly_chart(fig_worker, use_container_width=True)
 
 with tab2:
