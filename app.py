@@ -35,7 +35,7 @@ if 'v_w_init' not in st.session_state: st.session_state['v_w_init'] = 80
 if 'v_i_init' not in st.session_state: st.session_state['v_i_init'] = 1000
 if 'v_i_final' not in st.session_state: st.session_state['v_i_final'] = 500
 
-# [신설] 각 파라미터별 고정(Lock) 제어 상태 초기화 등록
+# 각 파라미터별 고정(Lock) 제어 상태 초기화 등록
 for pk in param_keys:
     if f"lock_{pk}" not in st.session_state:
         st.session_state[f"lock_{pk}"] = False
@@ -188,6 +188,13 @@ with tab1:
         col_l, col_r = st.columns([2, 1])
         with col_l:
             st.subheader("💰 비용 세부 구성")
+            
+            # [버그 수정 완료]: NameError 해결을 위한 세션 상태 인자 변수 명시적 매핑 바인딩
+            v_c_reg = st.session_state['v_c_reg']
+            v_c_inv = st.session_state['v_c_inv']
+            v_c_mat = st.session_state['v_c_mat']
+            v_c_sub = st.session_state['v_c_sub']
+            
             costs = {
                 "노무비": sum(v_c_reg*m.W[t]() for t in range(1,len(demand)+1)), 
                 "재고비": sum(v_c_inv*m.I[t]() for t in range(1,len(demand)+1)), 
@@ -209,7 +216,7 @@ with tab1:
         
         w_min, w_max = min(worker_counts), max(worker_counts)
         margin = max(2, int((w_max - w_min) * 0.5)) if w_max != w_min else 5
-        fig_worker.update_layout(yaxis=dict(range=[w_min - margin, w_max + margin], dtick=1, title="인원 수 (명)"), xaxis=dict(title="분석 대상 월"), hovermode="x unified")
+        fig_worker.update_layout(yaxis=dict(range=[w_min - margin, w_max + margin], dtick=1, title="인원 수 (명)"), xaxis=dict(title="분석 대상 월"), hovermode="x unified"||)
         st.plotly_chart(fig_worker, use_container_width=True)
 
 with tab2:
@@ -240,7 +247,6 @@ with tab3:
         else:
             base_ctx = "데이터 없음"
 
-        # [고도화] 각 변수들의 실시간 수치 정보와 잠금(Lock) 상태 기술 명세서를 가공하여 피딩
         p_status = []
         for pk in param_keys:
             val = st.session_state.get(pk)
@@ -258,3 +264,4 @@ with tab3:
             st.session_state['param_updated_by_ai'] = False
             st.session_state['trigger_reoptimize'] = True
             st.rerun()
+}
