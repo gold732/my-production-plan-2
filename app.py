@@ -11,7 +11,7 @@ from ui_components import (
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
-# 1. 기초 파라미터 이니셜라이징
+# 초기값 설정
 param_defaults = {
     'opt_mode': "정수계획법(IP)", 'enable_sub': True, 'std_time': 4.0, 'working_days': 20, 'ot_limit': 10,
     'max_util': 100.0, 'min_inv': 0.0, 'max_cost': 999999.0, 'v_c_reg': 640.0, 'v_c_ot': 6.0,
@@ -21,12 +21,11 @@ param_defaults = {
 for k, v in param_defaults.items():
     if k not in st.session_state: st.session_state[k] = v
 
-# AI 자동 수정을 위한 버퍼 처리
 if st.session_state.get('pending_updates'):
     for pk, pval in st.session_state['pending_updates'].items(): st.session_state[pk] = pval
     st.session_state['pending_updates'] = {}; st.session_state['trigger_reoptimize'] = True
 
-# 2. 보안 잠금(Lock) 초기 설정
+# 보안 잠금 설정
 initial_locked_keys = {
     'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 'v_c_mat', 'v_c_back', 
     'std_time', 'opt_mode', 'enable_sub', 'v_i_final', 'max_util', 'min_inv', 'max_cost'
@@ -35,11 +34,9 @@ for pk in initial_locked_keys:
     if f"lock_{pk}" not in st.session_state: st.session_state[f"lock_{pk}"] = True
 if "lock_demand_raw" not in st.session_state: st.session_state["lock_demand_raw"] = True
 
-# 상태값 초기화
-for key in ['messages', 'success', 'utils', 'trigger_reoptimize', 'ai_analysis']:
-    if key not in st.session_state: st.session_state[key] = [] if key == 'messages' else None
+for key in ['messages', 'success', 'utils', 'trigger_reoptimize', 'ai_analysis', 'skip_analysis']:
+    if key not in st.session_state: st.session_state[key] = [] if key == 'messages' else (False if key == 'skip_analysis' else None)
 
-# 3. 사이드바 및 최적화 실행
 demand, enable_sub, std_time, working_days, ot_limit = render_sidebar()
 
 def run_optimization():
@@ -57,48 +54,45 @@ def run_optimization():
             st.session_state['res'] = m; st.session_state['success'] = True
             st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
             
-            # 비현실적 가동률 체크
-            if any(u >= 99.9 for u in st.session_state['utils']):
-                st.warning("⚠️ 경고: 일부 월의 가동률이 100%에 도달했습니다. 이는 비현실적인 계획일 수 있으므로 AI 상담방에서 '가동률 안정화'를 요청하십시오.")
-
-            ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
-            st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
-            st.toast("✅ 전략적 생산계획 수립 및 AI 분석 완료!")
+            # [RPD 최적화 핵심]: AI 상담원이 수정한 경우 자동 분석은 건너뜀
+            if not st.session_state.get('skip_analysis'):
+                ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}"
+                st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
+            else:
+                # 다음 번을 위해 플래그 원복
+                st.session_state['skip_analysis'] = False
+                
+            st.toast("✅ 최적화 완료")
         else: 
-            # [🚨 복구 모드]: 최적해 없을 시 AI 자율 복구 트리거
-            st.error("❌ 최적해 없음: 현재 제약 조건 내에서는 수학적 해가 존재하지 않습니다.")
-            st.info("🤖 AI가 시스템 복구를 위해 파라미터 조정을 자동 시도합니다...")
-            recovery_ctx = f"상태:Infeasible(해 없음) | 수요:{demand} | 가동률제한:{st.session_state['max_util']}% | 비용제한:{st.session_state['max_cost']}"
-            recovery_msg = get_ai_consultant("최적화 실패 상태입니다. 해가 산출될 수 있도록 파라미터를 즉시 조정하세요.", recovery_ctx)
-            st.session_state.messages.append({"role": "assistant", "content": f"🚨 [자동 복구 알림] {recovery_msg}"})
+            st.error("❌ 최적해 없음")
+            # 자동 복구 시에도 AI 상담원을 호출하므로 분석 중복 발생 방지
+            st.session_state['skip_analysis'] = True
+            recovery_msg = get_ai_consultant("최적화 실패 복구 요청", "상태:Infeasible")
+            st.session_state.messages.append({"role": "assistant", "content": f"🚨 [자동 복구] {recovery_msg}"})
             
-    except Exception as e: st.error(f"⚠️ 시스템 런타임 오류: {str(e)}")
+    except Exception as e: st.error(f"⚠️ 시스템 오류: {str(e)}")
 
 if st.session_state.get('trigger_reoptimize'):
     st.session_state['trigger_reoptimize'] = False; run_optimization()
 
-# 4. 4단 전문 탭 UI 배치
 t1, t2, t3, t4 = st.tabs(["📊 공급망 운영", "📉 리스크/효율", "📋 데이터 마스터", "💬 AI 전략 상담방"])
 
 with t1:
     if st.button("🚀 생산계획 수립 실행"): run_optimization()
-    if st.session_state.get('success'):
-        render_supply_demand_tab(st.session_state['res'], st.session_state['utils'], demand)
+    if st.session_state.get('success'): render_supply_demand_tab(st.session_state['res'], st.session_state['utils'], demand)
 
 with t2:
-    if st.session_state.get('success'):
-        render_risk_efficiency_tab(st.session_state['res'], st.session_state['utils'], demand)
+    if st.session_state.get('success'): render_risk_efficiency_tab(st.session_state['res'], st.session_state['utils'], demand)
 
 with t3:
-    if st.session_state.get('success'):
-        render_data_master_tab(st.session_state['res'], st.session_state['utils'], demand)
+    if st.session_state.get('success'): render_data_master_tab(st.session_state['res'], st.session_state['utils'], demand)
 
 with t4:
     st.subheader("💬 AI 전략 상담방")
     if st.button("🧹 초기화"): st.session_state.messages = []; st.rerun()
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
-    if prompt := st.chat_input("의사결정에 필요한 조언을 구하세요"):
+    if prompt := st.chat_input("조언을 구하세요"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"):
