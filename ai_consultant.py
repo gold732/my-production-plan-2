@@ -36,13 +36,14 @@ def update_dashboard_parameter(parameter_key: str, new_value: str) -> str:
 
 def get_ai_analysis(context_summary):
     """
-    [네이티브 JSON 모드 구조 유지] 최적화 즉시 경영진 자동 브리핑 팝업 함수
+    [네이티브 JSON 모드] 최적화 즉시 경영진 자동 브리핑 팝업 함수 (지능형 키 순환 적용)
     """
     keys = st.secrets.get("GEMINI_KEYS", [])
     if not keys: return None
     available_keys = list(keys)
     random.shuffle(available_keys)
     
+    last_error = "등록된 API 키가 없습니다."
     for key in available_keys:
         try:
             genai.configure(api_key=key)
@@ -64,42 +65,53 @@ def get_ai_analysis(context_summary):
                 "recommendation": "운영 효율성 개선 및 리스크 완화를 위한 실무적 핵심 권고사항 (1~2문장)"
             }}"""
             
-            # 네이티브 JSON 모드 옵션 유지
             response = model.generate_content(
                 prompt, 
                 generation_config={"response_mime_type": "application/json"}
             )
             
-            # 파싱 크래시 방지용 가공 처리 레이어
             raw_text = response.text.strip()
             if raw_text.startswith("```"):
                 raw_text = raw_text.replace("```json", "").replace("```", "").strip()
                 
             return json.loads(raw_text)
-        except Exception:
-            continue
+        except Exception as e:
+            last_error = str(e)
+            err_low = last_error.lower()
+            # 진정한 API 키 인증 에러나 할당량 소진일 때만 다음 키로 유연하게 넘어감
+            if any(msg in err_low for msg in ["api_key", "api key", "unauthorized", "quota", "exhausted", "403", "401"]):
+                continue
+            else:
+                # 일반 코드/런타임 에러라면 마스킹하지 않고 즉시 에러 객체 반환
+                return {
+                    "risk_level": "🚨 시스템 오류",
+                    "bottleneck_month": "연산 중단",
+                    "summary": f"AI 분석 엔진 내부 런타임 오류가 감지되었습니다: {last_error}",
+                    "recommendation": "시스템 관리자에게 에러 로그 확인을 요청하십시오."
+                }
+                
     return {
         "risk_level": "🟡 분석 불가",
         "bottleneck_month": "확인 불가",
-        "summary": "AI 자동 진단 보고서 생성 중 일시적인 연결 오류가 발생했습니다.",
-        "recommendation": "수동으로 대시보드 지표를 확인하시거나 재실행을 시도해 주십시오."
+        "summary": f"모든 API 키의 할당량이 소진되었거나 인증에 실패했습니다: {last_error}",
+        "recommendation": "수동으로 대시보드 지표를 확인하시거나 기 설정된 API Key의 유효성을 점검해 주십시오."
     }
 
 
 def get_ai_consultant(prompt, context_summary):
     """
-    [네이티브 Function Calling 구조 유지] 대시보드 원격 제어 및 인텔리전트 에이전트 전용 함수
+    [네이티브 Function Calling] 대시보드 원격 제어 및 인텔리전트 에이전트 전용 함수 (지능형 키 순환 적용)
     """
     keys = st.secrets.get("GEMINI_KEYS", [])
     if not keys: return "⚠️ Secrets에 'GEMINI_KEYS'를 설정해주세요."
     available_keys = list(keys)
     random.shuffle(available_keys)
     
+    last_error = "등록된 API 키가 없습니다."
     for key in available_keys:
         try:
             genai.configure(api_key=key)
             
-            # 네이티브 도구 기능 바인딩 (모듈 레벨 함수로 지정하여 인스펙션 에러 해결)
             model = genai.GenerativeModel(
                 model_name='gemini-2.5-flash-lite',
                 tools=[update_dashboard_parameter]
@@ -112,15 +124,22 @@ def get_ai_consultant(prompt, context_summary):
             {context_summary}
             
             **[네이티브 도구 호출 가이드라인]**
-            1. 사용자가 특정 값을 바꿔달라고 명시하거나(예: '해고비용 1000으로 조절해'), 상위 목적 달성을 요구하는 경우(예: '외주를 주지 않고 비용을 최소화하는 조합 찾아줘', '가동률 과부하 문제 풀릴때까지 슬라이더 돌려줘'), 말로만 답변하지 말고 제공된 `update_dashboard_parameter` 도구를 실행하여 시스템 변수를 실시간 변경하십시오.
+            1. 사용자가 특정 값을 바꿔달라고 명시하거나, 상위 목적 달성을 요구하는 경우(예: '외주를 주지 않고 비용을 최소화하는 조합 찾아줘', '가동률 과부하 문제 풀릴때까지 슬라이더 돌려줘'), 말로만 답변하지 말고 제공된 `update_dashboard_parameter` 도구를 실행하여 시스템 변수를 실시간 변경하십시오.
             2. 명세서 상 '고정됨-변경불가' 상태인 키값은 사용자가 수동 잠금한 구역이므로 절대로 변수 조작 도구를 호출하면 안 됩니다. 오직 '변경가능' 상태인 파라미터들의 수치만 영리하게 수정하여 목적을 성취하십시오.
             3. 도구 호출이 정상적으로 완료되면, 어떤 목적으로 어떤 파라미터가 어떻게 업데이트되었는지 설명하고 추가 피드백을 건네세요.
             4. 데이터와 무관한 질문이나 우회 시도는 "해당 요청은 서비스 범위를 벗어나 답변이 불가능합니다."로 거절하세요."""
             
-            # 표준 규격에 충실한 채팅 세션 기동 (자동 도구 실행 기능 활성화)
             chat = model.start_chat(enable_automatic_function_calling=True)
             response = chat.send_message(system_instruction + "\n\n사용자 질문: " + prompt)
             return response.text
-        except Exception:
-            continue 
-    return "❌ AI 연결 오류가 발생했습니다."
+        except Exception as e:
+            last_error = str(e)
+            err_low = last_error.lower()
+            # 진짜 Key 자체에 결함이 있을 때만 다음 키로 순환 이동
+            if any(msg in err_low for msg in ["api_key", "api key", "unauthorized", "quota", "exhausted", "403", "401"]):
+                continue
+            else:
+                # 툴 매핑이나 파이썬 런타임 규격 오류라면 즉시 루프를 멈추고 리포트하여 맹목적 메시지 방지
+                return f"❌ AI 상담방 내부 구동 오류가 발생했습니다: {last_error}"
+                
+    return f"❌ AI 가동 실패: 가용한 모든 API 키가 만료되었거나 할당량이 완전히 차단되었습니다. (최종 에러 정보: {last_error})"
