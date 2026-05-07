@@ -11,7 +11,7 @@ st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
 # 2. 파라미터 제어를 위한 세션 상태 양방향 초기화 구조 설계
-param_keys = ['opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit', 
+param_keys = ['opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit', 'max_util',
               'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub',
               'v_w_init', 'v_i_init', 'v_i_final']
 
@@ -30,6 +30,7 @@ if 'enable_sub' not in st.session_state: st.session_state['enable_sub'] = True
 if 'std_time' not in st.session_state: st.session_state['std_time'] = 4.0
 if 'working_days' not in st.session_state: st.session_state['working_days'] = 20
 if 'ot_limit' not in st.session_state: st.session_state['ot_limit'] = 10
+if 'max_util' not in st.session_state: st.session_state['max_util'] = 100.0
 if 'v_c_reg' not in st.session_state: st.session_state['v_c_reg'] = 640
 if 'v_c_ot' not in st.session_state: st.session_state['v_c_ot'] = 6
 if 'v_c_h' not in st.session_state: st.session_state['v_c_h'] = 300
@@ -43,13 +44,13 @@ if 'v_w_init' not in st.session_state: st.session_state['v_w_init'] = 80
 if 'v_i_init' not in st.session_state: st.session_state['v_i_init'] = 1000
 if 'v_i_final' not in st.session_state: st.session_state['v_i_final'] = 500
 
-# 초기 앱 구동 시 무조건 고정(체크 활성화)되어야 하는 보안 변수 목록 명시
+# 초기 앱 구동 시 무조건 고정(체크 활성화)되어야 하는 9가지 보안 고정 변수 목록 명시 명부
 initial_locked_keys = {
     'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 
     'v_c_mat', 'v_c_back', 'std_time', 'opt_mode', 'enable_sub'
 }
 
-# 각 파라미터별 고정(Lock) 제어 상태 초기화 등록 및 강제 고정 주입
+# 각 파라미터별 고정(Lock) 제어 상태 초기화 등록 및 지정된 핵심 변수 강제 고정 주입
 for pk in param_keys:
     if f"lock_{pk}" not in st.session_state: 
         st.session_state[f"lock_{pk}"] = (pk in initial_locked_keys)
@@ -87,7 +88,7 @@ def run_optimization_process():
             st.session_state['std_time'], st.session_state['working_days'], 
             st.session_state['ot_limit'], st.session_state['v_w_init'], 
             st.session_state['v_i_init'], st.session_state['v_i_final'], 
-            st.session_state['enable_sub']
+            st.session_state['enable_sub'], st.session_state['max_util']
         )
         if sol.solver.termination_condition == TerminationCondition.optimal:
             st.session_state['res'] = model
