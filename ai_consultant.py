@@ -7,7 +7,11 @@ def update_dashboard_parameter(parameter_key: str, new_value: str) -> str:
     """대시보드의 제어판 입력 파라미터(비용 설정, 공정 제약 설정, 운영 초기값 등)를 동적으로 변경합니다. 
     사용자가 특정 운영 목적(비용 절감, 가동률 과부하 해소 등)을 달성해달라고 지시하거나, 
     수학적으로 최적해를 찾을 수 없는(Infeasible) 상황을 해결하기 위해 이 도구를 호출하십시오.
-    단, 사용자가 [고정] 체크박스를 켠 잠금 상태의 파라미터는 절대 변경할 수 없습니다.
+    
+   [💡 AI 필독 지침]
+    1. 'max_util'(가동률)이나 'max_cost'(예산)가 고정(Lock)되어 변경할 수 없다면, 
+       즉시 'working_days'(가동일)나 'ot_limit'(연장근로 한도) 같은 대안 변수를 수정하여 최적해를 찾으십시오.
+    2. 특정 값이 고정되어 수정 거부 메시지가 나오면, 포기하지 말고 다른 '고정되지 않은' 변수를 조합하십시오.
 
     Args:
         parameter_key: 변경할 대상 파라미터의 고유 키 명칭. 
@@ -98,44 +102,73 @@ def get_ai_analysis(context_summary):
 
 
 def get_ai_consultant(prompt, context_summary):
+    """
+    S&OP 전문가 AI 컨설턴트: 
+    사용자의 요청을 분석하고, 필요시 대시보드 파라미터를 직접 수정합니다.
+    """
     keys = st.secrets.get("GEMINI_KEYS", [])
-    if not keys: return "⚠️ API 키를 설정해주세요."
+    if not keys: 
+        return "⚠️ Secrets에 'GEMINI_KEYS'를 설정해주세요."
     
     available_keys = list(keys)
     random.shuffle(available_keys)
     
+    # 1. 현재 대시보드의 잠금(Lock) 상태를 동적으로 파악
+    # 주의: 대시보드의 체크박스 키값(lock_...)과 일치해야 합니다.
+    target_params = [
+        'std_time', 'working_days', 'ot_limit', 'max_util', 
+        'min_inv', 'max_cost', 'enable_sub', 'opt_mode'
+    ]
+    lock_status = {p: st.session_state.get(f"lock_{p}", False) for p in target_params}
+    
+    # 2. AI에게 부여할 강력한 시스템 지침 (잠금 상태 포함)
+    system_instruction = f"""당신은 S&OP 생산관리 전문가이자 제어판을 완벽하게 통제하는 컨트롤 에이전트입니다.
+
+[현재 운영 환경 데이터]
+{context_summary}
+
+[파라미터 잠금(Lock) 현황]
+{lock_status}
+※ 중요: 'True'인 항목은 사용자가 고정한 것이므로 절대 수정할 수 없습니다. 
+반드시 'False'인 항목들만 조절하여 최적의 운영 방안을 찾으십시오.
+
+[전략적 제어 규칙]
+1. **논리적 우회 탐색**: 예산(max_cost)이나 가동률(max_util)이 고정되어 수정할 수 없다면, 즉시 'working_days'(가동일)를 늘리거나 'ot_limit'(연장근로)을 조정하는 등 '변경 가능한(False)' 변수들을 조합하여 문제를 해결하십시오.
+2. **최적화 실패(Infeasible) 대응**: 현재 상태가 실패라면, 질문하지 말고 즉시 `update_dashboard_parameter`를 실행하여 가능한 범위 내에서 해를 찾으십시오.
+3. **변명 금지**: "수정이 불가능합니다"라고 말하기 전에, 잠기지 않은 다른 변수가 있는지 샅샅이 검토하십시오.
+4. **결과 브리핑**: 파라미터를 수정한 후에는 어떤 값을 왜 바꿨는지, 그 결과가 어떻게 개선되었는지 논리적으로 설명하십시오."""
+
+    last_error = "등록된 API 키가 없습니다."
+    
     for key in available_keys:
         try:
             genai.configure(api_key=key)
-            # 1. 모델 설정 (시스템 인스트럭션 포함)
+            # 모델 설정 (함수 도구 포함)
             model = genai.GenerativeModel(
-                model_name='gemini-2.5-flash-lite', 
+                model_name='gemini-1.5-flash', # 혹은 사용 중인 최신 모델명
                 tools=[update_dashboard_parameter]
             )
             
-            # 2. 자동 함수 호출 활성화하여 채팅 시작
-            # 이 옵션이 켜져 있으면 SDK가 알아서 '함수 실행 -> 결과 전달 -> 최종 답변' 과정을 처리합니다.
+            # 자동 함수 호출 활성화
             chat = model.start_chat(enable_automatic_function_calling=True)
             
-            system_instruction = f"""생산관리 전문가로서 다음 상황을 분석하세요: {context_summary}
-            필요 시 update_dashboard_parameter를 사용하여 파라미터를 조정하십시오."""
+            # 메시지 전송 (지침 + 사용자 질문)
+            response = chat.send_message(f"{system_instruction}\n\n사용자 질문: {prompt}")
             
-            # 3. 메시지 전송
-            full_prompt = f"{system_instruction}\n\n사용자 질문: {prompt}"
-            response = chat.send_message(full_prompt)
-
-            # 4. [중요] 안전한 텍스트 추출 방식
-            # response.text를 바로 쓰지 말고, 텍스트 파트가 있는지 먼저 확인합니다.
-            if response.candidates[0].content.parts:
+            # [에러 방지] response.text에 직접 접근하기 전, 유효한 텍스트 파트가 있는지 확인
+            if response.candidates and response.candidates[0].content.parts:
                 for part in response.candidates[0].content.parts:
-                    if hasattr(part, 'text'):
+                    if hasattr(part, 'text') and part.text:
                         return part.text
             
-            return "AI가 변경 사항을 적용했습니다. (추가 설명 없음)"
+            return "✅ 파라미터 조정을 완료했습니다. 대시보드에서 업데이트된 결과를 확인하세요."
 
         except Exception as e:
-            # 에러 로그 출력 (디버깅용)
-            print(f"Error with key {key[:5]}...: {e}")
-            continue # 다음 키로 시도
-            
-    return "❌ 모든 API 키 시도 실패 또는 유효한 응답을 받지 못했습니다."
+            last_error = str(e)
+            # API 키 이슈(쿼터 초과 등)인 경우 다음 키로 시도
+            if any(msg in last_error.lower() for msg in ["api_key", "quota", "exhausted", "403", "401"]):
+                continue
+            else:
+                return f"❌ AI 구동 오류: {last_error}"
+                
+    return f"❌ AI 가동 실패 (최종 에러: {last_error})"
