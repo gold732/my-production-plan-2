@@ -145,7 +145,7 @@ def get_ai_consultant(prompt, context_summary):
             genai.configure(api_key=key)
             # 모델 설정 (함수 도구 포함)
             model = genai.GenerativeModel(
-                model_name='gemini-1.5-flash', # 혹은 사용 중인 최신 모델명
+                model_name='gemini-2.5-flash', # 혹은 사용 중인 최신 모델명
                 tools=[update_dashboard_parameter]
             )
             
