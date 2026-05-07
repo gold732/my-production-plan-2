@@ -1,5 +1,5 @@
 import streamlit as st
-from pyomo.environ import TerminationCondition
+from pyomo.environ import TerminationCondition, NonNegativeIntegers, NonNegativeReals
 
 # 모듈화된 비즈니스 로직 및 UI 컴포넌트 레이어 인입
 from ai_consultant import get_ai_consultant, get_ai_analysis
@@ -15,7 +15,6 @@ param_keys = ['opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit',
               'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub',
               'v_w_init', 'v_i_init', 'v_i_final']
 
-# [핵심 변경 및 오류 수정]: 위젯 인스턴스화 예외 해결 레이어 설치
 # 에이전트가 우회 조작한 값이 버퍼(pending_updates)에 있다면 위젯이 빌드되기 '직전'에 선행 주입 매핑 처리
 if 'pending_updates' not in st.session_state: 
     st.session_state['pending_updates'] = {}
@@ -47,7 +46,8 @@ if 'v_i_final' not in st.session_state: st.session_state['v_i_final'] = 500
 # 각 파라미터별 고정(Lock) 제어 상태 초기화 등록
 for pk in param_keys:
     if f"lock_{pk}" not in st.session_state: st.session_state[f"lock_{pk}"] = False
-if "lock_demand_raw" not in st.session_state: st.session_state["lock_demand_raw"] = False
+if "lock_demand_raw" not in st.session_state:
+    st.session_state["lock_demand_raw"] = False
 
 # 공통 세션 상태 유지
 if 'messages' not in st.session_state: st.session_state.messages = []
@@ -67,8 +67,11 @@ def run_optimization_process():
     try:
         current_demand = [float(d.strip()) for d in st.session_state['demand_raw'].split(",")]
         
+        # [버그 수정 완료]: 모듈화 격리로 스코프가 끊겼던 도메인 타입을 세션 상태 기준으로 동적 계산 복구
+        current_domain = NonNegativeIntegers if "IP" in st.session_state['opt_mode'] else NonNegativeReals
+        
         model, sol = solve_production_plan(
-            current_demand, domain_type, 
+            current_demand, current_domain, 
             st.session_state['v_c_reg'], st.session_state['v_c_ot'], 
             st.session_state['v_c_h'], st.session_state['v_c_l'], 
             st.session_state['v_c_inv'], st.session_state['v_c_back'], 
@@ -121,7 +124,6 @@ with tab1:
         st.markdown("---")
 
     if st.session_state.get('success'):
-        # 모듈화 컴포넌트 이관 호출을 통한 획기적인 코드 압축 진행
         render_metrics_and_charts(st.session_state['res'], st.session_state['utils'], demand)
 
 with tab2:
@@ -161,7 +163,6 @@ with tab3:
             st.markdown(ai_res)
             st.session_state.messages.append({"role": "assistant", "content": ai_res})
             
-        # AI가 도구를 구동하여 param_updated_by_ai 플래그가 격상되면 즉시 리런
         if st.session_state.get('param_updated_by_ai', False):
             st.session_state['param_updated_by_ai'] = False
-            st.rerun() # 새로고침되며 스크립트 최상단의 pending_updates 가 가동되어 에러 없이 완벽 반영
+            st.rerun()
