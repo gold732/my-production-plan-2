@@ -34,11 +34,16 @@ def render_sidebar():
         with c1: ot_limit = st.slider("인당 월간 초과근무 제한 (Hr)", 0, 30, key="ot_limit")
         with c2: st.checkbox("고정", key="lock_ot_limit")
 
+        # [🚨 구조 수선] 가동률 및 재고 안전 가드 통합 섹션
         st.markdown("---")
-        st.subheader("🛡️ 가동률 안전 가드")
+        st.subheader("🛡️ 가동률 및 재고 안전 가드")
         c1, c2 = st.columns([3, 1])
         with c1: max_util = st.slider("최대 허용 가동률 (%)", 50.0, 100.0, key="max_util")
         with c2: st.checkbox("고정", key="lock_max_util")
+
+        c1, c2 = st.columns([3, 1])
+        with c1: min_inv = st.slider("최소 유지 재고량 (ea)", 0, 5000, key="min_inv")
+        with c2: st.checkbox("고정", key="lock_min_inv")
 
         st.markdown("---")
         st.subheader("💰 운영 비용 설정 (천원)")
@@ -71,10 +76,6 @@ def render_sidebar():
     return demand, enable_sub, std_time, working_days, ot_limit
 
 def render_metrics_and_charts(m, utils, demand):
-    """
-    메인 운영 대시보드 탭의 카드 메트릭, 메인 혼합 바차트, 
-    비용 파이차트 및 왜곡 보정 인력 차트를 렌더링하는 컴포넌트 함수
-    """
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("총 운영 비용", f"{m.cost():,.0f}k")
     k2.metric("평균 가동률", f"{sum(utils)/len(utils):.1f}%")
@@ -123,10 +124,7 @@ def render_metrics_and_charts(m, utils, demand):
     st.plotly_chart(fig_worker, use_container_width=True)
 
 def render_risk_analysis(utils, demand):
-    """
-    가동률 분석 전용 area 차트를 그리는 컴포넌트 함수
-    """
     st.subheader("⚠️ 운영 리스크 분석 (가동률)")
-    fig_risk = px.area(x=list(range(1,len(demand)+1)), y=utils, title="가동률 추이 (%)", markers=True)
+    fig_risk = px.area(x=list(range(1,len(demand)+1)), y=utils, title="生産 가동률 추이 (%)", markers=True)
     fig_risk.add_hline(y=100, line_dash="dot", line_color="red", annotation_text="위험(100%)", annotation_position="bottom right")
     st.plotly_chart(fig_risk, use_container_width=True)
