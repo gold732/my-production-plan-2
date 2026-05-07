@@ -1,4 +1,4 @@
-import streamlit st
+import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -34,7 +34,6 @@ def render_sidebar():
         with c1: ot_limit = st.slider("인당 월간 초과근무 제한 (Hr)", 0, 30, key="ot_limit")
         with c2: st.checkbox("고정", key="lock_ot_limit")
 
-        # [🚨 신규 추가] 최대 허용 가동률 제약 제어 위젯 레이어
         st.markdown("---")
         st.subheader("🛡️ 가동률 안전 가드")
         c1, c2 = st.columns([3, 1])
