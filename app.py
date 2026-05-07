@@ -4,15 +4,15 @@ from pyomo.environ import NonNegativeIntegers, NonNegativeReals, TerminationCond
 import plotly.graph_objects as go
 import plotly.express as px
 
-# 모듈화된 비즈니스 로직 함수 로드
+# 모듈화된 비즈니스 로직 함수 로드 (ai_consultant는 수정된 버전 사용)
 from ai_consultant import get_ai_consultant, get_ai_analysis
 from optimization_engine import solve_production_plan
 
-# 1. 페이지 설정 및 디자인 
+# 1. 페이지 설정 및 디자인 (동일 보존)
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
-# 2. 파라미터 제어를 위한 세션 상태 양방향 초기화 구조 설계
+# 2. 파라미터 제어를 위한 세션 상태 양방향 초기화 구조 설계 (동일 보존)
 if 'opt_mode' not in st.session_state: st.session_state['opt_mode'] = "정수계획법(IP)"
 if 'enable_sub' not in st.session_state: st.session_state['enable_sub'] = True
 if 'std_time' not in st.session_state: st.session_state['std_time'] = 4.0
@@ -39,13 +39,11 @@ if 'ai_analysis' not in st.session_state: st.session_state['ai_analysis'] = None
 if 'param_updated_by_ai' not in st.session_state: st.session_state['param_updated_by_ai'] = False
 if 'trigger_reoptimize' not in st.session_state: st.session_state['trigger_reoptimize'] = False
 
-# 3. 사이드바 - 세션 상태 데이터와 유기적으로 양방향 연동 처리
+# 3. 사이드바 - 세션 상태 데이터와 유기적으로 양방향 연동 처리 (동일 보존)
 with st.sidebar:
     st.header("🎮 시스템 제어판")
     opt_mode = st.radio("알고리즘 선택", ["정수계획법(IP)", "선형계획법(LP)"], key="opt_mode")
-    domain_type = NonNegativeIntegers if "IP" in opt_mode else NonNegativeReals
 
-    # [요청 사항] 외주 On/Off 토글 추가
     st.markdown("---")
     st.subheader("🏭 공급망 전략")
     enable_sub = st.toggle("외주 하청(Outsourcing) 허용", key="enable_sub")
@@ -75,7 +73,7 @@ with st.sidebar:
     v_i_init = st.number_input("현재고 수준", key="v_i_init")
     v_i_final = st.number_input("기말 목표 재고", key="v_i_final")
 
-# 공통 비즈니스 로직 실행 함수 분리 및 최적화 흐름 모듈화 (기존 로직 100% 동일 보존)
+# 공통 비즈니스 로직 실행 함수 (수정된 ai_consultant 로직 반영)
 def run_optimization_process():
     st.session_state['success'] = False
     st.session_state['ai_analysis'] = None
@@ -98,14 +96,14 @@ def run_optimization_process():
             st.session_state['res'] = model
             st.session_state['success'] = True
             
-            # 가동률 계산 및 전역 저장 (AI 연동용)
+            # 가동률 계산 및 전역 저장 (AI 연동용, 로직 보존)
             temp_utils = []
             for t in range(1, len(current_demand) + 1):
                 denom = 8 * st.session_state['working_days'] * model.W[t]()
                 temp_utils.append((model.P[t]() * st.session_state['std_time'] / denom * 100) if denom > 0 else 0)
             st.session_state['utils'] = temp_utils
             
-            # [아이디어 1 & 2 적용] 최적화 완료 즉시 JSON 분석 데이터 백그라운드 연동 실행
+            # [수정된 ai_consultant 분석 호출] 가동률 100%를 리스크로 판단하는 로직 반영
             u_str = ", ".join([f"{i+1}월:{val:.1f}%" for i, val in enumerate(temp_utils)])
             ctx_summary = f"총비용:{model.cost():,.0f}, 가동률:[{u_str}], 외주허용:{st.session_state['enable_sub']}"
             st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
@@ -116,7 +114,7 @@ def run_optimization_process():
     except Exception as e:
         st.error(f"⚠️ 오류: {str(e)}")
 
-# [아이디어 3 적용] AI가 파라미터를 변경했을 때 트리거되어 작동하는 자동 백그라운드 재연산 구간
+# [아이디어 3 적용] AI가 파라미터를 변경했을 때 트리거되어 작동하는 자동 백그라운드 재연산 구간 (보존)
 if st.session_state['trigger_reoptimize']:
     st.session_state['trigger_reoptimize'] = False
     run_optimization_process()
@@ -127,7 +125,7 @@ with tab1:
     if st.button("🚀 최적 생산계획 수립 실행"):
         run_optimization_process()
 
-    # [아이디어 1 & 2 UI 연동] 메인 화면 최상단에 자동으로 배치되는 AI 전문 보고서 섹션
+    # [수정된 AI 보고서 영역] 강화된 가동률 리스크 분석 결과 반영
     if st.session_state.get('success') and st.session_state.get('ai_analysis'):
         st.markdown("### 🤖 AI 전문 컨설턴트 종합 진단 보고서")
         analysis = st.session_state['ai_analysis']
@@ -150,7 +148,7 @@ with tab1:
         k3.metric("인력 변동 수", f"{sum(m.H[t]() + m.L[t]() for t in range(1,len(demand)+1)):.0f}명")
         k4.metric("기말 재고량", f"{m.I[len(demand)]():,.0f}ea")
 
-        # 메인 차트
+        # 메인 차트 (생산/재고)
         st.subheader("📈 월별 생산/수요/재고 흐름")
         fig = go.Figure()
         fig.add_trace(go.Bar(x=list(range(1,len(demand)+1)), y=[m.P[t]() for t in range(1,len(demand)+1)], name="자체 생산", marker_color='royalblue'))
@@ -160,7 +158,9 @@ with tab1:
         fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
 
-        col_l, col_r = st.columns(2)
+        # [피드백 반영: 인력 그래프 배치 분리]
+        # 비용 파이차트만 왼쪽 열에 배치
+        col_l, col_r = st.columns([2, 1]) # 너비 비율 조정
         with col_l:
             st.subheader("💰 비용 세부 구성")
             costs = {
@@ -171,16 +171,23 @@ with tab1:
                 "기타": m.cost() - sum((v_c_reg*m.W[t]() + v_c_inv*m.I[t]() + v_c_mat*m.P[t]() + v_c_sub*m.C[t]()) for t in range(1,len(demand)+1))
             }
             st.plotly_chart(px.pie(names=list(costs.keys()), values=list(costs.values()), hole=0.4), use_container_width=True)
+            
         with col_r:
-            st.subheader("👷 월별 인력 운영 현황")
-            st.line_chart(pd.DataFrame({"인원": [m.W[t]() for t in range(1,len(demand)+1)]}))
+            # 기존에 인력 그래프가 있던 자리(오른쪽 열)는 비우거나 다른 메트릭으로 활용 가능 (여기서는 비움)
+            pass
+
+        # [피드백 반영: 인력 그래프 섹션 하단 전체 너비로 이동]
+        st.markdown("---")
+        st.subheader("👷 월별 인력 운영 현황")
+        st.line_chart(pd.DataFrame({"인원": [m.W[t]() for t in range(1,len(demand)+1)]}))
 
 with tab2:
     if st.session_state.get('success'):
         utils = st.session_state['utils']
         st.subheader("⚠️ 운영 리스크 분석 (가동률)")
         fig_risk = px.area(x=list(range(1,len(demand)+1)), y=utils, title="생산 가동률 추이 (%)", markers=True)
-        fig_risk.add_hline(y=100, line_dash="dot", line_color="red")
+        # 위험 수위(100%) 시각적 강조
+        fig_risk.add_hline(y=100, line_dash="dot", line_color="red", annotation_text="위험(100%)", annotation_position="bottom right")
         st.plotly_chart(fig_risk, use_container_width=True)
 
 with tab3:
@@ -196,6 +203,7 @@ with tab3:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         
+        # 최적화 결과 기반 컨텍스트 구성 (동일 보존)
         if st.session_state['success']:
             m = st.session_state['res']
             u_str = ", ".join([f"{i+1}월:{val:.1f}%" for i, val in enumerate(st.session_state['utils'])])
@@ -203,14 +211,14 @@ with tab3:
         else:
             ctx = "데이터 없음"
 
+        # [수정된 AI 컨설턴트 호출] 페르소나와 분석 지침이 강화된 어시스턴트 답변 생성
         with st.chat_message("assistant"):
             ai_res = get_ai_consultant(prompt, ctx)
             st.markdown(ai_res)
             st.session_state.messages.append({"role": "assistant", "content": ai_res})
             
-        # [아이디어 3 연동] 에이전트가 변수를 수정했다고 플래그를 세우면 즉각 최적화 플래그 세팅 후 페이지 새로고침
+        # [아이디어 3 연동] 에이전트가 변수를 수정했다고 플래그를 세우면 즉각 최적화 플래그 세팅 후 페이지 새로고침 (보존)
         if st.session_state['param_updated_by_ai']:
             st.session_state['param_updated_by_ai'] = False
             st.session_state['trigger_reoptimize'] = True
             st.rerun()
-
