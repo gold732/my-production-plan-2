@@ -94,9 +94,10 @@ def render_supply_demand_tab(m, utils, demand):
     min_i = st.session_state.get('min_inv', 0.0)
     if min_i > 0:
         fig.add_hline(y=min_i, line_dash="dot", line_color="#27AE60", annotation_text="최소 재고 가이드", yref="y2")
-    fig.update_layout(yaxis2=dict(overlaying='y', side='right', title="재고량"), barmode='stack', hovermode="x unified")
+    fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
+    # [🚨 복구]: 고해상도 인력 배치 동태 차트
     st.subheader("👷 인력 최적 배치 및 고용/해고 트렌드")
     worker_counts = [int(m.W[t]()) for t in range(1, len(demand) + 1)]
     hired = [int(m.H[t]()) for t in range(1, len(demand) + 1)]
@@ -105,7 +106,7 @@ def render_supply_demand_tab(m, utils, demand):
     fig_w.add_trace(go.Bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=hired, name="신규 고용 (+)", marker_color="#3498DB"))
     fig_w.add_trace(go.Bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=[-x for x in fired], name="해고 처리 (-)", marker_color="#E67E22"))
     fig_w.add_trace(go.Scatter(x=[f"{t}월" for t in range(1,len(demand)+1)], y=worker_counts, mode="lines+markers+text", name="총 가동 인원", text=worker_counts, textposition="top center", line=dict(color="#1ABC9C", width=4)))
-    fig_w.update_layout(barmode='overlay', hovermode="x unified", yaxis_title="인원 수 (명)")
+    fig_w.update_layout(barmode='overlay', hovermode="x unified")
     st.plotly_chart(fig_w, use_container_width=True)
 
 def render_risk_efficiency_tab(m, utils, demand):
