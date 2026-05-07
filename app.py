@@ -5,76 +5,141 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 # 모듈화된 비즈니스 로직 함수 로드
-from ai_consultant import get_ai_consultant
+from ai_consultant import get_ai_consultant, get_ai_analysis
 from optimization_engine import solve_production_plan
 
 # 1. 페이지 설정 및 디자인 
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
-# 3. 사이드바
+# 2. 파라미터 제어를 위한 세션 상태 양방향 초기화 구조 설계
+if 'opt_mode' not in st.session_state: st.session_state['opt_mode'] = "정수계획법(IP)"
+if 'enable_sub' not in st.session_state: st.session_state['enable_sub'] = True
+if 'std_time' not in st.session_state: st.session_state['std_time'] = 4.0
+if 'working_days' not in st.session_state: st.session_state['working_days'] = 20
+if 'ot_limit' not in st.session_state: st.session_state['ot_limit'] = 10
+if 'v_c_reg' not in st.session_state: st.session_state['v_c_reg'] = 640
+if 'v_c_ot' not in st.session_state: st.session_state['v_c_ot'] = 6
+if 'v_c_h' not in st.session_state: st.session_state['v_c_h'] = 300
+if 'v_c_l' not in st.session_state: st.session_state['v_c_l'] = 500
+if 'v_c_inv' not in st.session_state: st.session_state['v_c_inv'] = 2
+if 'v_c_back' not in st.session_state: st.session_state['v_c_back'] = 5
+if 'v_c_mat' not in st.session_state: st.session_state['v_c_mat'] = 10
+if 'v_c_sub' not in st.session_state: st.session_state['v_c_sub'] = 30
+if 'demand_raw' not in st.session_state: st.session_state['demand_raw'] = "1600, 3000, 3200, 3800, 2200, 2200"
+if 'v_w_init' not in st.session_state: st.session_state['v_w_init'] = 80
+if 'v_i_init' not in st.session_state: st.session_state['v_i_init'] = 1000
+if 'v_i_final' not in st.session_state: st.session_state['v_i_final'] = 500
+
+# 기존 세션 제어 리스트 유지
+if 'messages' not in st.session_state: st.session_state.messages = []
+if 'success' not in st.session_state: st.session_state['success'] = False
+if 'utils' not in st.session_state: st.session_state['utils'] = []
+if 'ai_analysis' not in st.session_state: st.session_state['ai_analysis'] = None
+if 'param_updated_by_ai' not in st.session_state: st.session_state['param_updated_by_ai'] = False
+if 'trigger_reoptimize' not in st.session_state: st.session_state['trigger_reoptimize'] = False
+
+# 3. 사이드바 - 세션 상태 데이터와 유기적으로 양방향 연동 처리
 with st.sidebar:
     st.header("🎮 시스템 제어판")
-    opt_mode = st.radio("알고리즘 선택", ["정수계획법(IP)", "선형계획법(LP)"])
+    opt_mode = st.radio("알고리즘 선택", ["정수계획법(IP)", "선형계획법(LP)"], key="opt_mode")
     domain_type = NonNegativeIntegers if "IP" in opt_mode else NonNegativeReals
 
     # [요청 사항] 외주 On/Off 토글 추가
     st.markdown("---")
     st.subheader("🏭 공급망 전략")
-    enable_sub = st.toggle("외주 하청(Outsourcing) 허용", value=True)
+    enable_sub = st.toggle("외주 하청(Outsourcing) 허용", key="enable_sub")
 
     st.markdown("---")
     st.subheader("⏱️ 공정 효율 및 제약")
-    std_time = st.slider("제품당 표준 작업 시간 (Hr)", 1.0, 10.0, 4.0)
-    working_days = st.slider("월간 가동 일수", 1, 30, 20)
-    ot_limit = st.slider("인당 월간 초과근무 제한 (Hr)", 0, 30, 10)
+    std_time = st.slider("제품당 표준 작업 시간 (Hr)", 1.0, 10.0, key="std_time")
+    working_days = st.slider("월간 가동 일수", 1, 30, key="working_days")
+    ot_limit = st.slider("인당 월간 초과근무 제한 (Hr)", 0, 30, key="ot_limit")
 
     st.markdown("---")
     st.subheader("💰 운영 비용 설정 (천원)")
-    v_c_reg = st.number_input("정규 임금 (인/월)", value=640)
-    v_c_ot  = st.number_input("초과 근무 수당 (Hr)", value=6)
-    v_c_h   = st.number_input("신규 고용 비용 (인)", value=300)
-    v_c_l   = st.number_input("해고 비용 (인)", value=500)
-    v_c_inv = st.number_input("재고 유지비 (개/월)", value=2)
-    v_c_back= st.number_input("부재고 비용 (개/월)", value=5)
-    v_c_mat = st.number_input("재료비 (개당)", value=10)
-    v_c_sub = st.number_input("외주 하청 비용 (개당)", value=30)
+    v_c_reg = st.number_input("정규 임금 (인/월)", key="v_c_reg")
+    v_c_ot  = st.number_input("초과 근무 수당 (Hr)", key="v_c_ot")
+    v_c_h   = st.number_input("신규 고용 비용 (인)", key="v_c_h")
+    v_c_l   = st.number_input("해고 비용 (인)", key="v_c_l")
+    v_c_inv = st.number_input("재고 유지비 (개/월)", key="v_c_inv")
+    v_c_back= st.number_input("부재고 비용 (개/월)", key="v_c_back")
+    v_c_mat = st.number_input("재료비 (개당)", key="v_c_mat")
+    v_c_sub = st.number_input("외주 하청 비용 (개당)", key="v_c_sub")
 
     st.markdown("---")
     st.subheader("📈 초기값 및 수요")
-    demand_raw = st.text_input("6개월 수요 예측 (쉼표 구분)", "1600, 3000, 3200, 3800, 2200, 2200")
+    demand_raw = st.text_input("6개월 수요 예측 (쉼표 구분)", key="demand_raw")
     demand = [float(d.strip()) for d in demand_raw.split(",")]
-    v_w_init = st.number_input("현재 근로자 수", value=80)
-    v_i_init = st.number_input("현재고 수준", value=1000)
-    v_i_final = st.number_input("기말 목표 재고", value=500)
+    v_w_init = st.number_input("현재 근로자 수", key="v_w_init")
+    v_i_init = st.number_input("현재고 수준", key="v_i_init")
+    v_i_final = st.number_input("기말 목표 재고", key="v_i_final")
 
-# 5. 세션 상태 관리
-if 'messages' not in st.session_state: st.session_state.messages = []
-if 'success' not in st.session_state: st.session_state['success'] = False
-if 'utils' not in st.session_state: st.session_state['utils'] = []
+# 공통 비즈니스 로직 실행 함수 분리 및 최적화 흐름 모듈화 (기존 로직 100% 동일 보존)
+def run_optimization_process():
+    st.session_state['success'] = False
+    st.session_state['ai_analysis'] = None
+    try:
+        current_demand = [float(d.strip()) for d in st.session_state['demand_raw'].split(",")]
+        current_domain = NonNegativeIntegers if "IP" in st.session_state['opt_mode'] else NonNegativeReals
+        
+        model, sol = solve_production_plan(
+            current_demand, current_domain, 
+            st.session_state['v_c_reg'], st.session_state['v_c_ot'], 
+            st.session_state['v_c_h'], st.session_state['v_c_l'], 
+            st.session_state['v_c_inv'], st.session_state['v_c_back'], 
+            st.session_state['v_c_mat'], st.session_state['v_c_sub'], 
+            st.session_state['std_time'], st.session_state['working_days'], 
+            st.session_state['ot_limit'], st.session_state['v_w_init'], 
+            st.session_state['v_i_init'], st.session_state['v_i_final'], 
+            st.session_state['enable_sub']
+        )
+        if sol.solver.termination_condition == TerminationCondition.optimal:
+            st.session_state['res'] = model
+            st.session_state['success'] = True
+            
+            # 가동률 계산 및 전역 저장 (AI 연동용)
+            temp_utils = []
+            for t in range(1, len(current_demand) + 1):
+                denom = 8 * st.session_state['working_days'] * model.W[t]()
+                temp_utils.append((model.P[t]() * st.session_state['std_time'] / denom * 100) if denom > 0 else 0)
+            st.session_state['utils'] = temp_utils
+            
+            # [아이디어 1 & 2 적용] 최적화 완료 즉시 JSON 분석 데이터 백그라운드 연동 실행
+            u_str = ", ".join([f"{i+1}월:{val:.1f}%" for i, val in enumerate(temp_utils)])
+            ctx_summary = f"총비용:{model.cost():,.0f}, 가동률:[{u_str}], 외주허용:{st.session_state['enable_sub']}"
+            st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
+            
+            st.toast("✅ 최적화 성공 및 AI 분석 완료!")
+        else:
+            st.error("❌ 최적해를 찾지 못했습니다.")
+    except Exception as e:
+        st.error(f"⚠️ 오류: {str(e)}")
+
+# [아이디어 3 적용] AI가 파라미터를 변경했을 때 트리거되어 작동하는 자동 백그라운드 재연산 구간
+if st.session_state['trigger_reoptimize']:
+    st.session_state['trigger_reoptimize'] = False
+    run_optimization_process()
 
 tab1, tab2, tab3 = st.tabs(["📊 운영 대시보드", "📉 리스크/효율 분석", "💬 AI 전략 상담방"])
 
 with tab1:
     if st.button("🚀 최적 생산계획 수립 실행"):
-        st.session_state['success'] = False
-        with st.spinner('최적화 수행 중...'):
-            try:
-                model, sol = solve_production_plan(demand, domain_type, v_c_reg, v_c_ot, v_c_h, v_c_l, v_c_inv, v_c_back, v_c_mat, v_c_sub, std_time, working_days, ot_limit, v_w_init, v_i_init, v_i_final, enable_sub)
-                if sol.solver.termination_condition == TerminationCondition.optimal:
-                    st.session_state['res'] = model
-                    st.session_state['success'] = True
-                    # 가동률 계산 및 전역 저장 (AI 연동용)
-                    temp_utils = []
-                    for t in range(1, len(demand) + 1):
-                        denom = 8 * working_days * model.W[t]()
-                        temp_utils.append((model.P[t]() * std_time / denom * 100) if denom > 0 else 0)
-                    st.session_state['utils'] = temp_utils
-                    st.toast("✅ 최적화 성공!")
-                else:
-                    st.error("❌ 최적해를 찾지 못했습니다.")
-            except Exception as e:
-                st.error(f"⚠️ 오류: {str(e)}")
+        run_optimization_process()
+
+    # [아이디어 1 & 2 UI 연동] 메인 화면 최상단에 자동으로 배치되는 AI 전문 보고서 섹션
+    if st.session_state.get('success') and st.session_state.get('ai_analysis'):
+        st.markdown("### 🤖 AI 전문 컨설턴트 종합 진단 보고서")
+        analysis = st.session_state['ai_analysis']
+        
+        c_light, c_desc = st.columns([1, 4])
+        with c_light:
+            st.metric("운영 리스크 등급", analysis.get("risk_level", "🟡 주의"))
+            st.metric("최대 병목 월", analysis.get("bottleneck_month", "없음"))
+        with c_desc:
+            st.info(f"**📋 핵심 종합 브리핑**\n\n{analysis.get('summary', '')}")
+            st.warning(f"**💡 자원 최적화 권고사항**\n\n{analysis.get('recommendation', '')}")
+        st.markdown("---")
 
     if st.session_state.get('success'):
         m = st.session_state['res']
@@ -134,7 +199,7 @@ with tab3:
         if st.session_state['success']:
             m = st.session_state['res']
             u_str = ", ".join([f"{i+1}월:{val:.1f}%" for i, val in enumerate(st.session_state['utils'])])
-            ctx = f"총비용:{m.cost():,.0f}, 가동률:[{u_str}], 외주허용:{enable_sub}"
+            ctx = f"총비용:{m.cost():,.0f}, 가동률:[{u_str}], 외주허용:{st.session_state['enable_sub']}"
         else:
             ctx = "데이터 없음"
 
@@ -142,3 +207,10 @@ with tab3:
             ai_res = get_ai_consultant(prompt, ctx)
             st.markdown(ai_res)
             st.session_state.messages.append({"role": "assistant", "content": ai_res})
+            
+        # [아이디어 3 연동] 에이전트가 변수를 수정했다고 플래그를 세우면 즉각 최적화 플래그 세팅 후 페이지 새로고침
+        if st.session_state['param_updated_by_ai']:
+            st.session_state['param_updated_by_ai'] = False
+            st.session_state['trigger_reoptimize'] = True
+            st.rerun()
+}
