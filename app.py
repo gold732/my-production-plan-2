@@ -189,7 +189,6 @@ with tab1:
         with col_l:
             st.subheader("💰 비용 세부 구성")
             
-            # [버그 수정 완료]: NameError 해결을 위한 세션 상태 인자 변수 명시적 매핑 바인딩
             v_c_reg = st.session_state['v_c_reg']
             v_c_inv = st.session_state['v_c_inv']
             v_c_mat = st.session_state['v_c_mat']
@@ -216,6 +215,7 @@ with tab1:
         
         w_min, w_max = min(worker_counts), max(worker_counts)
         margin = max(2, int((w_max - w_min) * 0.5)) if w_max != w_min else 5
+        
         fig_worker.update_layout(yaxis=dict(range=[w_min - margin, w_max + margin], dtick=1, title="인원 수 (명)"), xaxis=dict(title="분석 대상 월"), hovermode="x unified")
         st.plotly_chart(fig_worker, use_container_width=True)
 
@@ -253,14 +253,44 @@ with tab3:
             is_locked = st.session_state.get(f"lock_{pk}", False)
             p_status.append(f"'{pk}': 현재값={val}(상태={'고정됨-변경불가' if is_locked else '변경가능'})")
         
-        ctx = f"{base_ctx} | 제어판 실시간 파라미터 락 명세서: [{', '.join(p_status)}]"
+        ctx = f"{base_ctx} | 실시간 파라미터 락 명세서: [{', '.join(p_status)}]"
 
         with st.chat_message("assistant"):
             ai_res = get_ai_consultant(prompt, ctx)
-            st.markdown(ai_res)
-            st.session_state.messages.append({"role": "assistant", "content": ai_res})
+            
+            # [신설]: AI가 출력한 특수 텍스트 명령줄을 감지하여 가드레일을 체크하는 결정론적 파서 레이어
+            cleaned_res = ai_res
+            lines = ai_res.split('\n')
+            for line in lines:
+                if "[UPDATE_PARAM:" in line and "]" in line:
+                    try:
+                        # 태그 파싱: 예) [UPDATE_PARAM: v_c_reg=1000]
+                        cmd = line.split("[UPDATE_PARAM:")[1].split("]")[0].strip()
+                        if "=" in cmd:
+                            k_name, v_val = cmd.split("=", 1)
+                            k_name = k_name.strip()
+                            v_val = v_val.strip()
+                            
+                            # 대시보드 고정 체크박스 상태 교차 검증 (보안벽)
+                            if not st.session_state.get(f"lock_{k_name}", False):
+                                if k_name == 'enable_sub':
+                                    st.session_state[k_name] = v_val.lower() in ['true', '1', 'yes', 'on']
+                                elif k_name in ['opt_mode', 'demand_raw']:
+                                    st.session_state[k_name] = str(v_val)
+                                else:
+                                    st.session_state[k_name] = float(v_val)
+                                st.session_state['param_updated_by_ai'] = True
+                        
+                        # 대화창 UI에 원형 원격 조작 명령어가 보이지 않도록 필터링 클렌징
+                        cleaned_res = cleaned_res.replace(line, "")
+                    except Exception:
+                        pass
+            
+            st.markdown(cleaned_res.strip())
+            st.session_state.messages.append({"role": "assistant", "content": cleaned_res.strip()})
             
         if st.session_state['param_updated_by_ai']:
             st.session_state['param_updated_by_ai'] = False
             st.session_state['trigger_reoptimize'] = True
             st.rerun()
+}
