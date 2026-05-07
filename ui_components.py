@@ -23,7 +23,8 @@ def render_sidebar():
         st.markdown("---")
         st.subheader("⏱️ 공정 효율 및 제약")
         c1, c2 = st.columns([3, 1])
-        with c1: std_time = st.slider("제품당 표준 작업 시간 (Hr)", 1.0, 10.0, key="std_time")
+        # [🚨 변경] 기존 슬라이더에서 숫자로 기입받는 방식으로 전면 개정
+        with c1: std_time = st.number_input("제품당 표준 작업 시간 (Hr)", min_value=1.0, max_value=10.0, step=0.1, key="std_time")
         with c2: st.checkbox("고정", key="lock_std_time")
         
         c1, c2 = st.columns([3, 1])
@@ -34,16 +35,23 @@ def render_sidebar():
         with c1: ot_limit = st.slider("인당 월간 초과근무 제한 (Hr)", 0, 30, key="ot_limit")
         with c2: st.checkbox("고정", key="lock_ot_limit")
 
-        # [🚨 구조 수선] 가동률 및 재고 안전 가드 통합 섹션
+        # 가동률 및 재고 안전 가드 통합 섹션 + 총 운영 비용 예산 제약 결합
         st.markdown("---")
-        st.subheader("🛡️ 가동률 및 재고 안전 가드")
+        st.subheader("🛡️ 가동률 및 운영 안전 가드")
         c1, c2 = st.columns([3, 1])
-        with c1: max_util = st.slider("최대 허용 가동률 (%)", 50.0, 100.0, key="max_util")
+        # [🚨 변경] 숫자로 정밀 기입 연동
+        with c1: max_util = st.number_input("최대 허용 가동률 (%)", min_value=50.0, max_value=100.0, step=0.5, key="max_util")
         with c2: st.checkbox("고정", key="lock_max_util")
 
         c1, c2 = st.columns([3, 1])
-        with c1: min_inv = st.slider("최소 유지 재고량 (ea)", 0, 5000, key="min_inv")
+        # [🚨 변경] 숫자로 정밀 기입 연동
+        with c1: min_inv = st.number_input("최소 유지 재고량 (ea)", min_value=0, max_value=10000, step=10, key="min_inv")
         with c2: st.checkbox("고정", key="lock_min_inv")
+
+        c1, c2 = st.columns([3, 1])
+        # [🚨 신규 추가] 총 운영 비용 한도 설정용 숫자 입력 필드 컴포넌트
+        with c1: max_cost = st.number_input("최대 허용 총 비용 (천원)", min_value=0.0, step=1000.0, key="max_cost")
+        with c2: st.checkbox("고정", key="lock_max_cost")
 
         st.markdown("---")
         st.subheader("💰 운영 비용 설정 (천원)")
