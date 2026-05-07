@@ -4,7 +4,7 @@ from pyomo.environ import NonNegativeIntegers, NonNegativeReals, TerminationCond
 import plotly.graph_objects as go
 import plotly.express as px
 
-# 모듈화된 비즈니스 로직 함수 로드 
+# 모듈화된 비즈니스 로직 함수 로드
 from ai_consultant import get_ai_consultant, get_ai_analysis
 from optimization_engine import solve_production_plan
 
@@ -13,6 +13,10 @@ st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
 # 2. 파라미터 제어를 위한 세션 상태 양방향 초기화 구조 설계
+param_keys = ['opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit', 
+              'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub',
+              'v_w_init', 'v_i_init', 'v_i_final']
+
 if 'opt_mode' not in st.session_state: st.session_state['opt_mode'] = "정수계획법(IP)"
 if 'enable_sub' not in st.session_state: st.session_state['enable_sub'] = True
 if 'std_time' not in st.session_state: st.session_state['std_time'] = 4.0
@@ -31,7 +35,14 @@ if 'v_w_init' not in st.session_state: st.session_state['v_w_init'] = 80
 if 'v_i_init' not in st.session_state: st.session_state['v_i_init'] = 1000
 if 'v_i_final' not in st.session_state: st.session_state['v_i_final'] = 500
 
-# 기존 세션 제어 리스트 유지
+# [신설] 각 파라미터별 고정(Lock) 제어 상태 초기화 등록
+for pk in param_keys:
+    if f"lock_{pk}" not in st.session_state:
+        st.session_state[f"lock_{pk}"] = False
+if "lock_demand_raw" not in st.session_state:
+    st.session_state["lock_demand_raw"] = False
+
+# 기존 공통 세션 상태 유지
 if 'messages' not in st.session_state: st.session_state.messages = []
 if 'success' not in st.session_state: st.session_state['success'] = False
 if 'utils' not in st.session_state: st.session_state['utils'] = []
@@ -39,41 +50,64 @@ if 'ai_analysis' not in st.session_state: st.session_state['ai_analysis'] = None
 if 'param_updated_by_ai' not in st.session_state: st.session_state['param_updated_by_ai'] = False
 if 'trigger_reoptimize' not in st.session_state: st.session_state['trigger_reoptimize'] = False
 
-# 3. 사이드바 - 세션 상태 데이터와 유기적으로 양방향 연동 처리
+# 3. 사이드바 - [고정] 체크박스를 유기적으로 결합한 멀티 컬럼 레이아웃 개편
 with st.sidebar:
     st.header("🎮 시스템 제어판")
-    opt_mode = st.radio("알고리즘 선택", ["정수계획법(IP)", "선형계획법(LP)"], key="opt_mode")
+    
+    c1, c2 = st.columns([3, 1])
+    with c1: opt_mode = st.radio("알고리즘 선택", ["정수계획법(IP)", "선형계획법(LP)"], key="opt_mode")
+    with c2: st.checkbox("고정", key="lock_opt_mode")
+    domain_type = NonNegativeIntegers if "IP" in opt_mode else NonNegativeReals
 
     st.markdown("---")
     st.subheader("🏭 공급망 전략")
-    enable_sub = st.toggle("외주 하청(Outsourcing) 허용", key="enable_sub")
+    c1, c2 = st.columns([3, 1])
+    with c1: enable_sub = st.toggle("외주 하청 허용", key="enable_sub")
+    with c2: st.checkbox("고정", key="lock_enable_sub")
 
     st.markdown("---")
     st.subheader("⏱️ 공정 효율 및 제약")
-    std_time = st.slider("제품당 표준 작업 시간 (Hr)", 1.0, 10.0, key="std_time")
-    working_days = st.slider("월간 가동 일수", 1, 30, key="working_days")
-    ot_limit = st.slider("인당 월간 초과근무 제한 (Hr)", 0, 30, key="ot_limit")
+    c1, c2 = st.columns([3, 1])
+    with c1: std_time = st.slider("제품당 표준 작업 시간 (Hr)", 1.0, 10.0, key="std_time")
+    with c2: st.checkbox("고정", key="lock_std_time")
+    
+    c1, c2 = st.columns([3, 1])
+    with c1: working_days = st.slider("월간 가동 일수", 1, 30, key="working_days")
+    with c2: st.checkbox("고정", key="lock_working_days")
+    
+    c1, c2 = st.columns([3, 1])
+    with c1: ot_limit = st.slider("인당 월간 초과근무 제한 (Hr)", 0, 30, key="ot_limit")
+    with c2: st.checkbox("고정", key="lock_ot_limit")
 
     st.markdown("---")
     st.subheader("💰 운영 비용 설정 (천원)")
-    v_c_reg = st.number_input("정규 임금 (인/월)", key="v_c_reg")
-    v_c_ot  = st.number_input("초과 근무 수당 (Hr)", key="v_c_ot")
-    v_c_h   = st.number_input("신규 고용 비용 (인)", key="v_c_h")
-    v_c_l   = st.number_input("해고 비용 (인)", key="v_c_l")
-    v_c_inv = st.number_input("재고 유지비 (개/월)", key="v_c_inv")
-    v_c_back= st.number_input("부재고 비용 (개/월)", key="v_c_back")
-    v_c_mat = st.number_input("재료비 (개당)", key="v_c_mat")
-    v_c_sub = st.number_input("외주 하청 비용 (개당)", key="v_c_sub")
+    cost_fields = [
+        ("v_c_reg", "정규 임금 (인/월)"), ("v_c_ot", "초과 근무 수당 (Hr)"),
+        ("v_c_h", "신규 고용 비용 (인)"), ("v_c_l", "해고 비용 (인)"),
+        ("v_c_inv", "재고 유지비 (개/월)"), ("v_c_back", "부재고 비용 (개/월)"),
+        ("v_c_mat", "재료비 (개당)"), ("v_c_sub", "외주 하청 비용 (개당)")
+    ]
+    for k, label in cost_fields:
+        c1, c2 = st.columns([3, 1])
+        with c1: st.number_input(label, key=k)
+        with c2: st.checkbox("고정", key=f"lock_{k}")
 
     st.markdown("---")
     st.subheader("📈 초기값 및 수요")
-    demand_raw = st.text_input("6개월 수요 예측 (쉼표 구분)", key="demand_raw")
+    c1, c2 = st.columns([3, 1])
+    with c1: demand_raw = st.text_input("6개월 수요 예측 (쉼표 구분)", key="demand_raw")
+    with c2: st.checkbox("고정", key="lock_demand_raw")
     demand = [float(d.strip()) for d in demand_raw.split(",")]
-    v_w_init = st.number_input("현재 근로자 수", key="v_w_init")
-    v_i_init = st.number_input("현재고 수준", key="v_i_init")
-    v_i_final = st.number_input("기말 목표 재고", key="v_i_final")
+    
+    init_fields = [
+        ("v_w_init", "현재 근로자 수"), ("v_i_init", "현재고 수준"), ("v_i_final", "기말 목표 재고")
+    ]
+    for k, label in init_fields:
+        c1, c2 = st.columns([3, 1])
+        with c1: st.number_input(label, key=k)
+        with c2: st.checkbox("고정", key=f"lock_{k}")
 
-# 공통 비즈니스 로직 실행 함수
+# 공통 최적화 수행 함수
 def run_optimization_process():
     st.session_state['success'] = False
     st.session_state['ai_analysis'] = None
@@ -105,7 +139,6 @@ def run_optimization_process():
             u_str = ", ".join([f"{i+1}월:{val:.1f}%" for i, val in enumerate(temp_utils)])
             ctx_summary = f"총비용:{model.cost():,.0f}, 가동률:[{u_str}], 외주허용:{st.session_state['enable_sub']}"
             st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
-            
             st.toast("✅ 최적화 성공 및 AI 분석 완료!")
         else:
             st.error("❌ 최적해를 찾지 못했습니다.")
@@ -125,7 +158,6 @@ with tab1:
     if st.session_state.get('success') and st.session_state.get('ai_analysis'):
         st.markdown("### 🤖 AI 전문 컨설턴트 종합 진단 보고서")
         analysis = st.session_state['ai_analysis']
-        
         c_light, c_desc = st.columns([1, 4])
         with c_light:
             st.metric("운영 리스크 등급", analysis.get("risk_level", "🟡 주의"))
@@ -164,57 +196,27 @@ with tab1:
                 "기타": m.cost() - sum((v_c_reg*m.W[t]() + v_c_inv*m.I[t]() + v_c_mat*m.P[t]() + v_c_sub*m.C[t]()) for t in range(1,len(demand)+1))
             }
             st.plotly_chart(px.pie(names=list(costs.keys()), values=list(costs.values()), hole=0.4), use_container_width=True)
-            
         with col_r:
             pass
 
-        # [피드백 적극 반영]: 직선 왜곡을 해결하기 위한 인력 변동 정밀 시각화 컴포넌트 고도화
         st.markdown("---")
         st.subheader("👷 월별 인력 운영 현황")
-        
         worker_counts = [int(m.W[t]()) for t in range(1, len(demand) + 1)]
-        df_worker = pd.DataFrame({
-            "월": [f"{t}월" for t in range(1, len(demand) + 1)],
-            "배치 인원 (명)": worker_counts
-        })
+        df_worker = pd.DataFrame({"월": [f"{t}월" for t in range(1, len(demand) + 1)], "배치 인원 (명)": worker_counts})
         
-        # Plotly Express Line 차트 생성 및 마커/텍스트 레이블 추가
-        fig_worker = px.line(
-            df_worker, 
-            x="월", 
-            y="배치 인원 (명)", 
-            markers=True, 
-            text="배치 인원 (명)",
-            title="월별 가동 인력 변동 추이 (정밀 스케일 격자 적용)"
-        )
+        fig_worker = px.line(df_worker, x="월", y="배치 인원 (명)", markers=True, text="배치 인원 (명)", title="월별 가동 인력 변동 추이 (정밀 스케일 격자 적용)")
+        fig_worker.update_traces(textposition="top center", line=dict(width=3, color="#1ABC9C"), marker=dict(size=8, symbol="circle"))
         
-        # 텍스트 배치 및 라인 비주얼 커스텀
-        fig_worker.update_traces(
-            textposition="top center", 
-            line=dict(width=3, color="#1ABC9C"),
-            marker=dict(size=8, symbol="circle")
-        )
-        
-        # 핵심 변경: y축의 범위를 데이터 변동폭에 맞게 타이트하게 동적 할당하여 '직선' 현상 제거
         w_min, w_max = min(worker_counts), max(worker_counts)
         margin = max(2, int((w_max - w_min) * 0.5)) if w_max != w_min else 5
-        
-        fig_worker.update_layout(
-            yaxis=dict(
-                range=[w_min - margin, w_max + margin],
-                dtick=1, # 1명 단위로 명확한 격자선 배치
-                title="인원 수 (명)"
-            ),
-            xaxis=dict(title="분석 대상 월"),
-            hovermode="x unified"
-        )
+        fig_worker.update_layout(yaxis=dict(range=[w_min - margin, w_max + margin], dtick=1, title="인원 수 (명)"), xaxis=dict(title="분석 대상 월"), hovermode="x unified")
         st.plotly_chart(fig_worker, use_container_width=True)
 
 with tab2:
     if st.session_state.get('success'):
         utils = st.session_state['utils']
         st.subheader("⚠️ 운영 리스크 분석 (가동률)")
-        fig_risk = px.area(x=list(range(1,len(demand)+1)), y=utils, title="생산 가동률 추이 (%)", markers=True)
+        fig_risk = px.area(x=list(range(1,len(demand)+1)), y=utils, title="生産 가동률 추이 (%)", markers=True)
         fig_risk.add_hline(y=100, line_dash="dot", line_color="red", annotation_text="위험(100%)", annotation_position="bottom right")
         st.plotly_chart(fig_risk, use_container_width=True)
 
@@ -234,9 +236,18 @@ with tab3:
         if st.session_state['success']:
             m = st.session_state['res']
             u_str = ", ".join([f"{i+1}월:{val:.1f}%" for i, val in enumerate(st.session_state['utils'])])
-            ctx = f"총비용:{m.cost():,.0f}, 가동률:[{u_str}], 외주허용:{st.session_state['enable_sub']}"
+            base_ctx = f"총비용:{m.cost():,.0f}, 가동률:[{u_str}]"
         else:
-            ctx = "데이터 없음"
+            base_ctx = "데이터 없음"
+
+        # [고도화] 각 변수들의 실시간 수치 정보와 잠금(Lock) 상태 기술 명세서를 가공하여 피딩
+        p_status = []
+        for pk in param_keys:
+            val = st.session_state.get(pk)
+            is_locked = st.session_state.get(f"lock_{pk}", False)
+            p_status.append(f"'{pk}': 현재값={val}(상태={'고정됨-변경불가' if is_locked else '변경가능'})")
+        
+        ctx = f"{base_ctx} | 제어판 실시간 파라미터 락 명세서: [{', '.join(p_status)}]"
 
         with st.chat_message("assistant"):
             ai_res = get_ai_consultant(prompt, ctx)
@@ -247,4 +258,3 @@ with tab3:
             st.session_state['param_updated_by_ai'] = False
             st.session_state['trigger_reoptimize'] = True
             st.rerun()
-
