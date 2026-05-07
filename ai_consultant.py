@@ -13,7 +13,7 @@ def update_dashboard_parameter(parameter_key: str, new_value: str) -> str:
                        종류: 'opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit', 
                              'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub',
                              'v_w_init', 'v_i_init', 'v_i_final'
-        new_value: 반영하고자 하는 새로운 값의 문자열 형태 (예: 숫자는 '25' 또는 '1000', 부울은 'True' 또는 'False', 알고리즘은 '정수계획법(IP)')
+        new_value: 반영하고자 하는 새로운 값의 문자열 형태 (예: 숫자는 '25' 또는 '1000', 부울 'True' 또는 'False')
     """
     lock_key = f"lock_{parameter_key}"
     # 사용자의 고정(Lock) 가드레일 조건 체크
@@ -22,21 +22,26 @@ def update_dashboard_parameter(parameter_key: str, new_value: str) -> str:
     
     try:
         if parameter_key == 'enable_sub':
-            st.session_state[parameter_key] = new_value.lower() in ['true', '1', 'yes', 'on']
+            val = new_value.lower() in ['true', '1', 'yes', 'on']
         elif parameter_key in ['opt_mode', 'demand_raw']:
-            st.session_state[parameter_key] = str(new_value)
+            val = str(new_value)
         else:
-            st.session_state[parameter_key] = float(new_value)
+            val = float(new_value)
             
+        # [에러 픽스]: 인스턴스화 에러를 완벽 차단하기 위해 스테이징 업데이트 버퍼 레이어에 예약 주입
+        if 'pending_updates' not in st.session_state:
+            st.session_state['pending_updates'] = {}
+        st.session_state['pending_updates'][parameter_key] = val
         st.session_state['param_updated_by_ai'] = True
-        return f"✅ 성공: '{parameter_key}' 파라미터가 네이티브 도구 호출을 통해 '{new_value}'(으)로 업데이트되었습니다."
+        
+        return f"✅ 예약 성공: '{parameter_key}' 파라미터 값이 '{new_value}'로 버퍼에 등록되었습니다. 다음 pass에서 완벽 반영됩니다."
     except Exception as e:
         return f"❌ 오류: 값 타입 변환 실패 ({str(e)})"
 
 
 def get_ai_analysis(context_summary):
     """
-    [네이티브 JSON 모드] 최적화 즉시 경영진 자동 브리핑 팝업 함수 (지능형 키 순환 적용)
+    [네이티브 JSON 모드] 최적화 즉시 경영진 자동 브리핑 팝업 함수
     """
     keys = st.secrets.get("GEMINI_KEYS", [])
     if not keys: return None
@@ -78,11 +83,9 @@ def get_ai_analysis(context_summary):
         except Exception as e:
             last_error = str(e)
             err_low = last_error.lower()
-            # 진정한 API 키 인증 에러나 할당량 소진일 때만 다음 키로 유연하게 넘어감
             if any(msg in err_low for msg in ["api_key", "api key", "unauthorized", "quota", "exhausted", "403", "401"]):
                 continue
             else:
-                # 일반 코드/런타임 에러라면 마스킹하지 않고 즉시 에러 객체 반환
                 return {
                     "risk_level": "🚨 시스템 오류",
                     "bottleneck_month": "연산 중단",
@@ -100,7 +103,7 @@ def get_ai_analysis(context_summary):
 
 def get_ai_consultant(prompt, context_summary):
     """
-    [네이티브 Function Calling] 대시보드 원격 제어 및 인텔리전트 에이전트 전용 함수 (지능형 키 순환 적용)
+    [네이티브 Function Calling] 대시보드 원격 제어 및 인텔리전트 에이전트 전용 함수
     """
     keys = st.secrets.get("GEMINI_KEYS", [])
     if not keys: return "⚠️ Secrets에 'GEMINI_KEYS'를 설정해주세요."
@@ -135,11 +138,9 @@ def get_ai_consultant(prompt, context_summary):
         except Exception as e:
             last_error = str(e)
             err_low = last_error.lower()
-            # 진짜 Key 자체에 결함이 있을 때만 다음 키로 순환 이동
             if any(msg in err_low for msg in ["api_key", "api key", "unauthorized", "quota", "exhausted", "403", "401"]):
                 continue
             else:
-                # 툴 매핑이나 파이썬 런타임 규격 오류라면 즉시 루프를 멈추고 리포트하여 맹목적 메시지 방지
                 return f"❌ AI 상담방 내부 구동 오류가 발생했습니다: {last_error}"
                 
     return f"❌ AI 가동 실패: 가용한 모든 API 키가 만료되었거나 할당량이 완전히 차단되었습니다. (최종 에러 정보: {last_error})"
