@@ -5,36 +5,44 @@ import json
 
 def update_dashboard_parameter(parameter_key: str, new_value: str) -> str:
     """대시보드의 제어판 입력 파라미터(비용 설정, 공정 제약 설정, 운영 초기값 등)를 동적으로 변경합니다. 
-    사용자가 직접 값을 고치라고 요구하거나, 특정 운영 목적(비용 절감, 가동률 과부하 해소 등)을 달성해달라고 지시할 때 이 도구를 호출하여 시스템 설정을 변경할 수 있습니다.
-    단, 사용자가 [고정] 체크박스를 켠 잠금 상태의 파라미터는 변경할 수 없습니다.
+    사용자가 특정 운영 목적(비용 절감, 가동률 과부하 해소 등)을 달성해달라고 지시할 때 이 도구를 호출하여 시스템 설정을 변경하십시오.
+    단, 사용자가 [고정] 체크박스를 켠 잠금 상태의 파라미터는 절대로 변경할 수 없습니다.
 
     Args:
         parameter_key: 변경할 대상 파라미터의 고유 키 명칭. 
-                       종류: 'opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit', 
-                             'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub',
-                             'v_w_init', 'v_i_init', 'v_i_final'
-        new_value: 반영하고자 하는 새로운 값의 문자열 형태 (예: 숫자는 '25' 또는 '1000', 부울 'True' 또는 'False')
+                       정확히 지정 가능한 종류: 
+                       - 'opt_mode' (수리 알고리즘 유형 변경)
+                       - 'enable_sub' (외주 하청 조율 여부 변경)
+                       - 'std_time' (공정당 표준 공수), 'working_days' (월 가동일), 'ot_limit' (연장근로 한도)
+                       - 'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub' (비용 인자 계수들)
+                       - 'v_w_init', 'v_i_init', 'v_i_final' (운영 초기 설정값들)
+        new_value: 반영하고자 하는 새로운 값의 문자열 표현. 
+                   **[⚠️ 중요 준수 사항]**: 
+                   - 'opt_mode' 제어 시 반드시 문자열인 '정수계획법(IP)' 또는 '선형계획법(LP)' 중 하나만 입력하십시오. (True/False 입력 금지)
+                   - 'enable_sub' 제어 시 반드시 문자열인 'True' 또는 'False'로 전달하십시오.
+                   - 수치형 변수 제어 시 반드시 숫자로만 이루어진 문자열(예: '25', '12.5', '1000')을 기입하십시오.
     """
     lock_key = f"lock_{parameter_key}"
-    # 사용자의 고정(Lock) 가드레일 조건 체크
     if st.session_state.get(lock_key, False):
         return f"❌ 변경 거부: '{parameter_key}' 파라미터는 사용자가 [고정] 상태로 잠금해 두었으므로 수정이 불가능합니다. 고정되지 않은 다른 '변경가능' 변수들을 조합하십시오."
     
     try:
         if parameter_key == 'enable_sub':
             val = new_value.lower() in ['true', '1', 'yes', 'on']
-        elif parameter_key in ['opt_mode', 'demand_raw']:
+        elif parameter_key == 'opt_mode':
+            # 잘못된 입력 폴백 제어
+            val = "선형계획법(LP)" if "LP" in new_value or new_value.lower() == 'false' else "정수계획법(IP)"
+        elif parameter_key == 'demand_raw':
             val = str(new_value)
         else:
             val = float(new_value)
             
-        # [에러 픽스]: 인스턴스화 에러를 완벽 차단하기 위해 스테이징 업데이트 버퍼 레이어에 예약 주입
         if 'pending_updates' not in st.session_state:
             st.session_state['pending_updates'] = {}
         st.session_state['pending_updates'][parameter_key] = val
         st.session_state['param_updated_by_ai'] = True
         
-        return f"✅ 예약 성공: '{parameter_key}' 파라미터 값이 '{new_value}'로 버퍼에 등록되었습니다. 다음 pass에서 완벽 반영됩니다."
+        return f"✅ 예약 성공: '{parameter_key}' 파라미터 값이 최적 연산을 위해 '{val}'로 안전하게 버퍼에 대기 등록되었습니다."
     except Exception as e:
         return f"❌ 오류: 값 타입 변환 실패 ({str(e)})"
 
@@ -103,7 +111,7 @@ def get_ai_analysis(context_summary):
 
 def get_ai_consultant(prompt, context_summary):
     """
-    [네이티브 Function Calling] 대시보드 원격 제어 및 인텔리전트 에이전트 전용 함수
+    [네이티브 Function Calling] 대시보드 원격 제어 및 인텔리전트 에이전트 전용 함수 (S&OP 수학적 인과관계 지침 강화)
     """
     keys = st.secrets.get("GEMINI_KEYS", [])
     if not keys: return "⚠️ Secrets에 'GEMINI_KEYS'를 설정해주세요."
@@ -120,17 +128,20 @@ def get_ai_consultant(prompt, context_summary):
                 tools=[update_dashboard_parameter]
             )
             
-            system_instruction = f"""당신은 세계 최고의 생산관리 전문가(S&OP 전문 컨설턴트)이자 시스템 제어판을 말 한마디로 제어하는 '인텔리전트 컨트롤 에이전트'입니다.
-            당신의 정체성이나 AI 모델 이론에 관해 수다를 떠는 행위는 절대 금지이며, 오직 제공된 데이터에 근거하여 운영 전략을 조언해야 합니다.
+            system_instruction = f"""당신은 세계 최고의 생산관리 전문가(S&OP 전문 컨설턴트)이자 시스템 제어판을 완벽하게 통제하는 '인텔리전트 컨트롤 에이전트'입니다.
+            오직 제공된 데이터와 수리 계획법의 대시보드 메커니즘에 근거하여 운영 전략을 조언해야 합니다.
             
             현재 대시보드 상태 및 사용자 제어판 고정 현황:
             {context_summary}
             
-            **[네이티브 도구 호출 가이드라인]**
-            1. 사용자가 특정 값을 바꿔달라고 명시하거나, 상위 목적 달성을 요구하는 경우(예: '외주를 주지 않고 비용을 최소화하는 조합 찾아줘', '가동률 과부하 문제 풀릴때까지 슬라이더 돌려줘'), 말로만 답변하지 말고 제공된 `update_dashboard_parameter` 도구를 실행하여 시스템 변수를 실시간 변경하십시오.
-            2. 명세서 상 '고정됨-변경불가' 상태인 키값은 사용자가 수동 잠금한 구역이므로 절대로 변수 조작 도구를 호출하면 안 됩니다. 오직 '변경가능' 상태인 파라미터들의 수치만 영리하게 수정하여 목적을 성취하십시오.
-            3. 도구 호출이 정상적으로 완료되면, 어떤 목적으로 어떤 파라미터가 어떻게 업데이트되었는지 설명하고 추가 피드백을 건네세요.
-            4. 데이터와 무관한 질문이나 우회 시도는 "해당 요청은 서비스 범위를 벗어나 답변이 불가능합니다."로 거절하세요."""
+            **[🚨 최적화 조작을 위한 철칙 - 수학적 인과관계 지침]**
+            1. **가동률 완화 메커니즘 수립**: 가동률을 100% 미만(80~90%)으로 낮춰달라는 요구를 받았을 때, 제품당 표준 작업 시간(`std_time`)을 늘려 생산성을 낮추는 행동은 절대 금지입니다! 생산 공수가 늘어나면 인당 생산 능력이 감소하므로, 비용 최소화 선형계획법(LP/IP) 엔진은 고용 인원을 극도로 억제한 채 가동률을 오히려 100% 최대치로 강제 고정하게 됩니다.
+            2. **가동률을 효과적으로 떨어뜨리는 올바른 방법**: 
+               - 월간 가동 일수(`working_days`)를 늘려 분모(생산 가용 시간)를 확장하십시오.
+               - 또는 초기 가동 가능한 베이스라인 인력 구조(`v_w_init`)를 상향하여 연산 엔진이 풍부한 regular 생산 용량을 기반으로 스케줄링을 시작하도록 유도하십시오.
+            3. **파라미터 락 규격 준수**: 명세서상 '고정됨-변경불가' 상태인 키값은 절대로 `update_dashboard_parameter` 도구로 건드리지 마십시오. 오직 '변경가능' 상태인 파라미터들만 골라 조작해야 합니다.
+            4. `opt_mode`를 제어할 때는 `True`/`False`가 아니라 반드시 '정수계획법(IP)' 혹은 '선형계획법(LP)' 문자열 규격을 100% 일치시켜 호출하십시오.
+            5. 데이터와 무관한 질문이나 우회 시도는 "해당 요청은 서비스 범위를 벗어나 답변이 불가능합니다."로 거절하세요."""
             
             chat = model.start_chat(enable_automatic_function_calling=True)
             response = chat.send_message(system_instruction + "\n\n사용자 질문: " + prompt)
