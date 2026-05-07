@@ -63,7 +63,7 @@ def get_ai_analysis(context_summary):
     for key in available_keys:
         try:
             genai.configure(api_key=key)
-            model = genai.GenerativeModel('gemini-3.1-flash-lite')
+            model = genai.GenerativeModel('gemini-2.5-flash-lite')
             
             prompt = f"""당신은 생산관리 전문가입니다. 제공된 S&OP 최적화 결과 데이터를 정밀하게 분석하여 경영진을 위한 종합 진단 보고서를 JSON 형태로 작성하세요.
             데이터: {context_summary}
@@ -145,7 +145,7 @@ def get_ai_consultant(prompt, context_summary):
             genai.configure(api_key=key)
             # 모델 설정 (함수 도구 포함)
             model = genai.GenerativeModel(
-                model_name='gemini-3.1-flash', # 혹은 사용 중인 최신 모델명
+                model_name='gemini-2.5-flash', # 혹은 사용 중인 최신 모델명
                 tools=[update_dashboard_parameter]
             )
             
