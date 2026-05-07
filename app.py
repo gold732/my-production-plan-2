@@ -26,7 +26,7 @@ if st.session_state.get('pending_updates'):
     for pk, pval in st.session_state['pending_updates'].items(): st.session_state[pk] = pval
     st.session_state['pending_updates'] = {}; st.session_state['trigger_reoptimize'] = True
 
-# 2. 보안 잠금(Lock) 초기 설정 (13종 전체 반영)
+# 2. 보안 잠금(Lock) 초기 설정 (사용자 요구 13종 대거 반영)
 initial_locked_keys = {
     'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 'v_c_mat', 'v_c_back', 
     'std_time', 'opt_mode', 'enable_sub', 'v_i_final', 'max_util', 'min_inv', 'max_cost'
@@ -56,7 +56,7 @@ def run_optimization():
         if sol.solver.termination_condition == TerminationCondition.optimal:
             st.session_state['res'] = m; st.session_state['success'] = True
             st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
-            # AI 분석 리포트 생성
+            # [🚨 복구]: 최적화 직후 AI 분석 리포트 생성
             ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
             st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
             st.toast("✅ 전략적 생산계획 수립 및 AI 분석 완료!")
@@ -77,7 +77,6 @@ with t1:
 with t2:
     if st.session_state.get('success'):
         render_risk_efficiency_tab(st.session_state['res'], st.session_state['utils'], demand)
-    else: st.info("먼저 [공급망 운영] 탭에서 실행 버튼을 눌러주세요.")
 
 with t3:
     if st.session_state.get('success'):
@@ -93,9 +92,7 @@ with t4:
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"):
             u_str = ", ".join([f"{v:.1f}%" for v in st.session_state['utils']]) if st.session_state['utils'] else "N/A"
-            m_res = st.session_state.get('res')
-            cost_val = f"{m_res.cost():,.0f}" if m_res else "N/A"
-            ctx = f"현재 가동률:[{u_str}] | 현재 비용:{cost_val}"
+            ctx = f"가동률:[{u_str}] | 비용:{st.session_state['res'].cost() if st.session_state['res'] else 'N/A'}"
             res = get_ai_consultant(prompt, ctx)
             st.markdown(res); st.session_state.messages.append({"role": "assistant", "content": res})
         if st.session_state.get('param_updated_by_ai'):
