@@ -97,10 +97,17 @@ def render_metrics_and_charts(m, utils, demand):
     fig = go.Figure()
     fig.add_trace(go.Bar(x=list(range(1,len(demand)+1)), y=[m.P[t]() for t in range(1,len(demand)+1)], name="자체 생산", marker_color='royalblue'))
     fig.add_trace(go.Bar(x=list(range(1,len(demand)+1)), y=[m.C[t]() for t in range(1,len(demand)+1)], name="외주 하청", marker_color='lightslategray'))
-    # [🚨 고도화] 미충족 수요인 부재고(Backlog) 리스크 트랙킹 바 차트 누적 바인딩
     fig.add_trace(go.Bar(x=list(range(1,len(demand)+1)), y=[m.S[t]() for t in range(1,len(demand)+1)], name="부재고 (미충족)", marker_color='crimson', opacity=0.8))
     fig.add_trace(go.Scatter(x=list(range(1,len(demand)+1)), y=demand, name="예상 수요", line=dict(color='darkorange', dash='dash')))
     fig.add_trace(go.Scatter(x=list(range(1,len(demand)+1)), y=[m.I[t]() for t in range(1,len(demand)+1)], name="재고 수준", yaxis="y2", line=dict(color='green', width=2.5)))
+    
+    # [🚨 신규 고도화] 설정한 최소 유지 재고량을 차트 우측(y2) 축 기준의 수평선으로 가시화하여 제약 충족 검증 지원
+    current_min_inv = st.session_state.get('min_inv', 0.0)
+    if current_min_inv > 0:
+        fig.add_hline(y=current_min_inv, line_dash="dot", line_color="#27AE60", 
+                      annotation_text=f"최소 유지 재고 ({current_min_inv:,.0f}ea)", 
+                      annotation_position="top left", yref="y2")
+
     fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
@@ -128,7 +135,6 @@ def render_metrics_and_charts(m, utils, demand):
         cleaned_costs = {k: v for k, v in costs.items() if v > 0}
         st.plotly_chart(px.pie(names=list(cleaned_costs.keys()), values=list(cleaned_costs.values()), hole=0.4), use_container_width=True)
     with col_r:
-        # [🚨 신규 추가] 공정 안정성을 진단하기 위한 월별 연장근로 총 시간 모니터링 차트
         st.subheader("⏳ 월별 총 연장근로(Overtime) 활용 추이")
         ot_hours = [m.O[t]() for t in range(1, len(demand) + 1)]
         df_ot = pd.DataFrame({"월": [f"{t}월" for t in range(1, len(demand) + 1)], "연장근로 시간 (Hr)": ot_hours})
@@ -148,7 +154,6 @@ def render_metrics_and_charts(m, utils, demand):
         "해고 인원 (명)": fired_counts
     })
     
-    # [🚨 고도화] 단순 라인에서 고용과 해고 수치가 대칭형으로 인입되는 전문 S&OP 혼합형 분석 그래프로 리모델링
     fig_worker = go.Figure()
     fig_worker.add_trace(go.Bar(x=df_labor["월"], y=df_labor["신규 고용 (명)"], name="신규 고용 (+명)", marker_color="#3498DB"))
     fig_worker.add_trace(go.Bar(x=df_labor["월"], y=[-x for x in df_labor["해고 인원 (명)"]], name="해고 처리 (-명)", marker_color="#E67E22"))
@@ -156,7 +161,6 @@ def render_metrics_and_charts(m, utils, demand):
     fig_worker.update_layout(barmode='overlay', hovermode="x unified")
     st.plotly_chart(fig_worker, use_container_width=True)
 
-    # [🚨 신규 추가] 실무진 및 의사결정권자가 수치를 교차 검증하고 엑셀로 내려받을 수 있는 마스터 데이터 테이블 시트
     st.markdown("---")
     with st.expander("📋 총괄생산계획(S&OP) 정밀 데이터 마스터 요약 시트"):
         data_sheet = []
@@ -186,7 +190,12 @@ def render_risk_analysis(utils, demand):
     """
     가동률 분석 전용 area 차트를 그리는 컴포넌트 함수
     """
+    # [🚨 한자 수정 및 고도화] '生産' 오타를 깔끔한 한글 '생산'으로 변경하고, 사용자가 기입한 max_util 수치를 동적 가이드 점선으로 표출
     st.subheader("⚠️ 운영 리스크 분석 (가동률)")
-    fig_risk = px.area(x=list(range(1,len(demand)+1)), y=utils, title="生産 가동률 추이 (%)", markers=True)
-    fig_risk.add_hline(y=100, line_dash="dot", line_color="red", annotation_text="위험(100%)", annotation_position="bottom right")
+    fig_risk = px.area(x=list(range(1,len(demand)+1)), y=utils, title="생산 가동률 추이 (%)", markers=True)
+    
+    current_max_util = st.session_state.get('max_util', 100.0)
+    fig_risk.add_hline(y=current_max_util, line_dash="dot", line_color="red", 
+                       annotation_text=f"최대 허용 가드라인 ({current_max_util:.1f}%)", 
+                       annotation_position="bottom right")
     st.plotly_chart(fig_risk, use_container_width=True)
