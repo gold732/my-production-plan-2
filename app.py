@@ -3,7 +3,7 @@ from pyomo.environ import TerminationCondition, NonNegativeIntegers, NonNegative
 
 from ai_consultant import get_ai_consultant, get_ai_analysis
 from optimization_engine import solve_production_plan
-# [🚨 수정]: 모든 함수 명칭을 ui_components.py와 100% 일치하도록 복구
+# [🚨 수정]: 임포트 구문을 ui_components.py의 4개 탭 함수와 완벽히 동기화
 from ui_components import (
     render_sidebar, 
     render_supply_demand_tab, 
@@ -14,7 +14,7 @@ from ui_components import (
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
-# 세션 상태 초기화 및 파라미터 락 설정 (유실 없이 보존)
+# 1. 파라미터 초기화 및 강제 잠금 레이어
 param_keys = ['opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit', 'max_util', 'min_inv', 'max_cost',
               'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub',
               'v_w_init', 'v_i_init', 'v_i_final']
@@ -24,22 +24,28 @@ if st.session_state['pending_updates']:
     for pk, pval in st.session_state['pending_updates'].items(): st.session_state[pk] = pval
     st.session_state['pending_updates'] = {}; st.session_state['trigger_reoptimize'] = True
 
-# 초기값 및 강제 잠금 초기화
-initial_locked_keys = {'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 'v_c_mat', 'v_c_back', 'std_time', 'opt_mode', 'enable_sub', 'v_i_final', 'max_util', 'min_inv', 'max_cost'}
+# 초기 구동 시 잠금 설정 (9개 핵심 변수 + 가드 변수들)
+initial_locked_keys = {
+    'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 'v_c_mat', 'v_c_back', 
+    'std_time', 'opt_mode', 'enable_sub', 'v_i_final', 'max_util', 'min_inv', 'max_cost'
+}
 for pk in param_keys:
     if f"lock_{pk}" not in st.session_state: st.session_state[f"lock_{pk}"] = (pk in initial_locked_keys)
 if "lock_demand_raw" not in st.session_state: st.session_state["lock_demand_raw"] = True
 
-# 세션 기본 상태
+# 기본 상태값 보존
+if 'demand_raw' not in st.session_state: st.session_state['demand_raw'] = "1600, 3000, 3200, 3800, 2200, 2200"
 for key in ['messages', 'success', 'utils', 'trigger_reoptimize']:
     if key not in st.session_state: st.session_state[key] = [] if key == 'messages' else False
 
+# 2. 사이드바 호출 (파싱 오류 가드 적용됨)
 demand, enable_sub, std_time, working_days, ot_limit = render_sidebar()
 
+# 3. 최적화 실행 워크플로우
 def run_optimization():
     st.session_state['success'] = False
     try:
-        cur_demand = [float(d.strip()) for d in st.session_state['demand_raw'].split(",")]
+        cur_demand = [float(d.strip()) for d in st.session_state['demand_raw'].split(",") if d.strip()]
         cur_domain = NonNegativeIntegers if "IP" in st.session_state['opt_mode'] else NonNegativeReals
         m, sol = solve_production_plan(
             cur_demand, cur_domain, st.session_state['v_c_reg'], st.session_state['v_c_ot'], 
@@ -52,14 +58,14 @@ def run_optimization():
             st.session_state['res'] = m; st.session_state['success'] = True
             st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(cur_demand)+1)]
             st.session_state['ai_analysis'] = get_ai_analysis(f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}")
-            st.toast("✅ 수립 완료!")
-        else: st.error("❌ 최적해 없음")
-    except Exception as e: st.error(f"⚠️ 오류: {str(e)}")
+            st.toast("✅ 최적 생산계획 수립 완료!")
+        else: st.error("❌ 최적해를 찾지 못했습니다. 제약조건을 완화해 보십시오.")
+    except Exception as e: st.error(f"⚠️ 시스템 오류: {str(e)}")
 
 if st.session_state.get('trigger_reoptimize'):
     st.session_state['trigger_reoptimize'] = False; run_optimization()
 
-# 4단 탭 구조 배치
+# 4. 4단 전문 탭 UI 배치
 t1, t2, t3, t4 = st.tabs(["📊 공급망 운영", "📉 리스크/효율", "📋 데이터 마스터", "💬 AI 전략 상담방"])
 
 with t1:
@@ -84,7 +90,9 @@ with t4:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"):
-            res = get_ai_consultant(prompt, "컨텍스트 요약...")
+            # AI 콘텍스트에 현재 락 상태 및 핵심 변수 전달
+            ctx = f"가동률:{st.session_state.get('utils', '없음')} | 락상태:{st.session_state.get('lock_max_util', True)}"
+            res = get_ai_consultant(prompt, ctx)
             st.markdown(res); st.session_state.messages.append({"role": "assistant", "content": res})
         if st.session_state.get('param_updated_by_ai'):
             st.session_state['param_updated_by_ai'] = False; st.rerun()
