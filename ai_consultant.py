@@ -99,46 +99,43 @@ def get_ai_analysis(context_summary):
 
 def get_ai_consultant(prompt, context_summary):
     keys = st.secrets.get("GEMINI_KEYS", [])
-    if not keys: return "⚠️ Secrets에 'GEMINI_KEYS'를 설정해주세요."
+    if not keys: return "⚠️ API 키를 설정해주세요."
+    
     available_keys = list(keys)
     random.shuffle(available_keys)
     
-    last_error = "등록된 API 키가 없습니다."
     for key in available_keys:
         try:
             genai.configure(api_key=key)
-            model = genai.GenerativeModel(model_name='gemini-2.5-flash-lite', tools=[update_dashboard_parameter])
+            # 1. 모델 설정 (시스템 인스트럭션 포함)
+            model = genai.GenerativeModel(
+                model_name='gemini-2.5-flash-lite', 
+                tools=[update_dashboard_parameter]
+            )
             
-            system_instruction = f"""당신은 S&OP 생산관리 전문가이자 제어판을 완벽하게 통제하는 컨트롤 에이전트입니다.
-            현재 상태: {context_summary}
-            
-            **[전략적 제어 및 복구 핵심 규칙]**
-            1. **최적화 실패(Infeasible) 대응**: 현재 상태가 'Infeasible'이거나 '최적화 실패' 상태라면, 사용자가 묻지 않아도 즉시 해가 나올 수 있도록 'max_util'을 높이거나 'max_cost'를 상향하고, 혹은 'enable_sub'를 'True'로 변경하는 등 조치를 취하십시오.
-            2. **가동률 현실화 가드**: 가동률 100%는 이론적으로 가능하나 실무적으로 불가능한 수치입니다. 가동률이 100%에 도달했다면 'max_util'을 90~95 수준으로 낮추도록 제안하거나 직접 조정하십시오.
-            3. **재고 방어 가드 (`min_inv`)**: "각 월의 재고를 X 이상 유지하라"는 요구 시 즉시 `'min_inv'`를 조정하십시오.
-            4. **예산 한도 가드 (`max_cost`)**: 비용 절감 요구 시 즉시 `'max_cost'`를 조정하십시오.
-            5. **자율 즉시 실행**: 해가 나오지 않는 상황에서는 질문을 던지지 말고 목적을 달성할 수 있는 파라미터를 스스로 결정하여 즉시 `update_dashboard_parameter` 도구를 실행하십시오."""
-            
+            # 2. 자동 함수 호출 활성화하여 채팅 시작
+            # 이 옵션이 켜져 있으면 SDK가 알아서 '함수 실행 -> 결과 전달 -> 최종 답변' 과정을 처리합니다.
             chat = model.start_chat(enable_automatic_function_calling=True)
-            try:
-                response = chat.send_message(system_instruction + "\n\n사용자 질문: " + prompt)
-                return response.text
-            except Exception as accessor_error:
-                if 'response' in locals() and hasattr(response, 'function_calls') and response.function_calls:
-                    for call in response.function_calls:
-                        if call.name == "update_dashboard_parameter":
-                            args = dict(call.args)
-                            result_str = update_dashboard_parameter(**args)
-                            fallback_prompt = f"[인프라 가드] 도구 실행 결과: {result_str}\n변경된 설정을 기반으로 최적화를 재수행합니다. 상황을 브리핑하십시오."
-                            response = chat.send_message(fallback_prompt)
-                    return response.text
-                else:
-                    raise accessor_error
+            
+            system_instruction = f"""생산관리 전문가로서 다음 상황을 분석하세요: {context_summary}
+            필요 시 update_dashboard_parameter를 사용하여 파라미터를 조정하십시오."""
+            
+            # 3. 메시지 전송
+            full_prompt = f"{system_instruction}\n\n사용자 질문: {prompt}"
+            response = chat.send_message(full_prompt)
+
+            # 4. [중요] 안전한 텍스트 추출 방식
+            # response.text를 바로 쓰지 말고, 텍스트 파트가 있는지 먼저 확인합니다.
+            if response.candidates[0].content.parts:
+                for part in response.candidates[0].content.parts:
+                    if hasattr(part, 'text'):
+                        return part.text
+            
+            return "AI가 변경 사항을 적용했습니다. (추가 설명 없음)"
+
         except Exception as e:
-            last_error = str(e)
-            if any(msg in last_error.lower() for msg in ["api_key", "api key", "unauthorized", "quota", "exhausted", "403", "401"]):
-                continue
-            else:
-                return f"❌ AI 구동 오류: {last_error}"
-                
-    return f"❌ AI 가동 실패 (최종 에러: {last_error})"
+            # 에러 로그 출력 (디버깅용)
+            print(f"Error with key {key[:5]}...: {e}")
+            continue # 다음 키로 시도
+            
+    return "❌ 모든 API 키 시도 실패 또는 유효한 응답을 받지 못했습니다."
