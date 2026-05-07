@@ -247,4 +247,4 @@ with tab3:
             st.session_state['param_updated_by_ai'] = False
             st.session_state['trigger_reoptimize'] = True
             st.rerun()
-}
+
