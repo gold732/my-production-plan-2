@@ -26,7 +26,7 @@ if st.session_state.get('pending_updates'):
     for pk, pval in st.session_state['pending_updates'].items(): st.session_state[pk] = pval
     st.session_state['pending_updates'] = {}; st.session_state['trigger_reoptimize'] = True
 
-# 2. 보안 잠금(Lock) 초기 설정 (사용자 요구 13종 대거 반영)
+# 2. 보안 잠금(Lock) 초기 설정
 initial_locked_keys = {
     'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 'v_c_mat', 'v_c_back', 
     'std_time', 'opt_mode', 'enable_sub', 'v_i_final', 'max_util', 'min_inv', 'max_cost'
@@ -56,11 +56,22 @@ def run_optimization():
         if sol.solver.termination_condition == TerminationCondition.optimal:
             st.session_state['res'] = m; st.session_state['success'] = True
             st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
-            # [🚨 복구]: 최적화 직후 AI 분석 리포트 생성
+            
+            # 비현실적 가동률 체크
+            if any(u >= 99.9 for u in st.session_state['utils']):
+                st.warning("⚠️ 경고: 일부 월의 가동률이 100%에 도달했습니다. 이는 비현실적인 계획일 수 있으므로 AI 상담방에서 '가동률 안정화'를 요청하십시오.")
+
             ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
             st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
             st.toast("✅ 전략적 생산계획 수립 및 AI 분석 완료!")
-        else: st.error("❌ 최적해 없음. 제약을 완화해 주세요.")
+        else: 
+            # [🚨 복구 모드]: 최적해 없을 시 AI 자율 복구 트리거
+            st.error("❌ 최적해 없음: 현재 제약 조건 내에서는 수학적 해가 존재하지 않습니다.")
+            st.info("🤖 AI가 시스템 복구를 위해 파라미터 조정을 자동 시도합니다...")
+            recovery_ctx = f"상태:Infeasible(해 없음) | 수요:{demand} | 가동률제한:{st.session_state['max_util']}% | 비용제한:{st.session_state['max_cost']}"
+            recovery_msg = get_ai_consultant("최적화 실패 상태입니다. 해가 산출될 수 있도록 파라미터를 즉시 조정하세요.", recovery_ctx)
+            st.session_state.messages.append({"role": "assistant", "content": f"🚨 [자동 복구 알림] {recovery_msg}"})
+            
     except Exception as e: st.error(f"⚠️ 시스템 런타임 오류: {str(e)}")
 
 if st.session_state.get('trigger_reoptimize'):
