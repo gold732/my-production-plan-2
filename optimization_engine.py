@@ -1,6 +1,6 @@
 from pyomo.environ import *
 
-def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, wdays, ot_lim, w0, i0, ifinal, use_sub, max_util=100.0):
+def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, wdays, ot_lim, w0, i0, ifinal, use_sub, max_util=100.0, min_inv=0.0):
     m = ConcreteModel()
     T = range(1, len(D) + 1); TIME = range(0, len(D) + 1)
     m.W = Var(TIME, domain=domain); m.H = Var(TIME, domain=domain); m.L = Var(TIME, domain=domain)
@@ -19,11 +19,11 @@ def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, 
         m.c.add(m.P[t] <= cap_reg + (1/stime)*m.O[t]) 
         m.c.add(m.I[t] == m.I[t-1] + m.P[t] + m.C[t] - D[t-1] - m.S[t-1] + m.S[t]) 
         m.c.add(m.O[t] <= ot_lim * m.W[t])
-        # 외주 허용 여부에 따른 제약
         if not use_sub:
             m.c.add(m.C[t] == 0)
-        # [🚨 신규 추가] 최대 허용 가동률 제약조건 (비용 최소화에 따른 인력 자동감축 부작용 방지 및 가동률 통제 마스터 가드)
         m.c.add(m.P[t] * stime <= (max_util / 100.0) * 8 * wdays * m.W[t])
+        # [🚨 신규 추가] 각 월별 최소 유지 재고 제약조건 (안전 재고 확보 가드 라인)
+        m.c.add(m.I[t] >= min_inv)
 
     m.c.add(m.I[len(D)] >= ifinal); m.c.add(m.S[len(D)] == 0)
     result = SolverFactory('glpk').solve(m)
