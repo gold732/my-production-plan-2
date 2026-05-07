@@ -1,6 +1,6 @@
 from pyomo.environ import *
 
-def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, wdays, ot_lim, w0, i0, ifinal, use_sub, max_util=100.0, min_inv=0.0):
+def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, wdays, ot_lim, w0, i0, ifinal, use_sub, max_util=100.0, min_inv=0.0, max_cost=99999999.0):
     m = ConcreteModel()
     T = range(1, len(D) + 1); TIME = range(0, len(D) + 1)
     m.W = Var(TIME, domain=domain); m.H = Var(TIME, domain=domain); m.L = Var(TIME, domain=domain)
@@ -22,9 +22,12 @@ def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, 
         if not use_sub:
             m.c.add(m.C[t] == 0)
         m.c.add(m.P[t] * stime <= (max_util / 100.0) * 8 * wdays * m.W[t])
-        # [🚨 신규 추가] 각 월별 최소 유지 재고 제약조건 (안전 재고 확보 가드 라인)
         m.c.add(m.I[t] >= min_inv)
 
     m.c.add(m.I[len(D)] >= ifinal); m.c.add(m.S[len(D)] == 0)
+    
+    # [🚨 신규 추가] 총 운영 비용 상한선 제약조건 (예산 바운더리 관리 기능)
+    m.c.add(m.cost <= max_cost)
+
     result = SolverFactory('glpk').solve(m)
     return m, result
