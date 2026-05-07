@@ -1,29 +1,25 @@
 import streamlit as st
 from pyomo.environ import TerminationCondition, NonNegativeIntegers, NonNegativeReals
 
-# 모듈화된 비즈니스 로직 및 UI 컴포넌트 레이어 인입
 from ai_consultant import get_ai_consultant, get_ai_analysis
 from optimization_engine import solve_production_plan
 from ui_components import render_sidebar, render_metrics_and_charts, render_risk_analysis
 
-# 1. 페이지 설정 및 디자인
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
-# 2. 파라미터 제어를 위한 세션 상태 양방향 초기화 구조 설계
-param_keys = ['opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit', 'max_util',
+param_keys = ['opt_mode', 'enable_sub', 'std_time', 'working_days', 'ot_limit', 'max_util', 'min_inv',
               'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub',
               'v_w_init', 'v_i_init', 'v_i_final']
 
-# 에이전트가 우회 조작한 값이 버퍼(pending_updates)에 있다면 위젯이 빌드되기 '직전'에 선행 주입 매핑 처리
 if 'pending_updates' not in st.session_state: 
     st.session_state['pending_updates'] = {}
 
 if st.session_state['pending_updates']:
     for pk, pval in st.session_state['pending_updates'].items():
         st.session_state[pk] = pval
-    st.session_state['pending_updates'] = {} # 버퍼 비우기
-    st.session_state['trigger_reoptimize'] = True # 재연산 최적화 플래그 격상
+    st.session_state['pending_updates'] = {}
+    st.session_state['trigger_reoptimize'] = True
 
 if 'opt_mode' not in st.session_state: st.session_state['opt_mode'] = "정수계획법(IP)"
 if 'enable_sub' not in st.session_state: st.session_state['enable_sub'] = True
@@ -31,6 +27,7 @@ if 'std_time' not in st.session_state: st.session_state['std_time'] = 4.0
 if 'working_days' not in st.session_state: st.session_state['working_days'] = 20
 if 'ot_limit' not in st.session_state: st.session_state['ot_limit'] = 10
 if 'max_util' not in st.session_state: st.session_state['max_util'] = 100.0
+if 'min_inv' not in st.session_state: st.session_state['min_inv'] = 0.0
 if 'v_c_reg' not in st.session_state: st.session_state['v_c_reg'] = 640
 if 'v_c_ot' not in st.session_state: st.session_state['v_c_ot'] = 6
 if 'v_c_h' not in st.session_state: st.session_state['v_c_h'] = 300
@@ -44,13 +41,11 @@ if 'v_w_init' not in st.session_state: st.session_state['v_w_init'] = 80
 if 'v_i_init' not in st.session_state: st.session_state['v_i_init'] = 1000
 if 'v_i_final' not in st.session_state: st.session_state['v_i_final'] = 500
 
-# 초기 앱 구동 시 무조건 고정(체크 활성화)되어야 하는 9가지 보안 고정 변수 목록 명시 명부
 initial_locked_keys = {
     'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 
     'v_c_mat', 'v_c_back', 'std_time', 'opt_mode', 'enable_sub'
 }
 
-# 각 파라미터별 고정(Lock) 제어 상태 초기화 등록 및 지정된 핵심 변수 강제 고정 주입
 for pk in param_keys:
     if f"lock_{pk}" not in st.session_state: 
         st.session_state[f"lock_{pk}"] = (pk in initial_locked_keys)
@@ -58,7 +53,6 @@ for pk in param_keys:
 if "lock_demand_raw" not in st.session_state:
     st.session_state["lock_demand_raw"] = False
 
-# 공통 세션 상태 유지
 if 'messages' not in st.session_state: st.session_state.messages = []
 if 'success' not in st.session_state: st.session_state['success'] = False
 if 'utils' not in st.session_state: st.session_state['utils'] = []
@@ -66,17 +60,13 @@ if 'ai_analysis' not in st.session_state: st.session_state['ai_analysis'] = None
 if 'param_updated_by_ai' not in st.session_state: st.session_state['param_updated_by_ai'] = False
 if 'trigger_reoptimize' not in st.session_state: st.session_state['trigger_reoptimize'] = False
 
-# 3. 사이드바 렌더링 모듈 호출 (대형 컴포넌트 이관 완료)
 demand, enable_sub, std_time, working_days, ot_limit = render_sidebar()
 
-# 공통 최적화 수행 워크플로우 함수
 def run_optimization_process():
     st.session_state['success'] = False
     st.session_state['ai_analysis'] = None
     try:
         current_demand = [float(d.strip()) for d in st.session_state['demand_raw'].split(",")]
-        
-        # [버그 수정 완료]: 모듈화 격리로 스코프가 끊겼던 도메인 타입을 세션 상태 기준으로 동적 계산 복구
         current_domain = NonNegativeIntegers if "IP" in st.session_state['opt_mode'] else NonNegativeReals
         
         model, sol = solve_production_plan(
@@ -88,7 +78,7 @@ def run_optimization_process():
             st.session_state['std_time'], st.session_state['working_days'], 
             st.session_state['ot_limit'], st.session_state['v_w_init'], 
             st.session_state['v_i_init'], st.session_state['v_i_final'], 
-            st.session_state['enable_sub'], st.session_state['max_util']
+            st.session_state['enable_sub'], st.session_state['max_util'], st.session_state['min_inv']
         )
         if sol.solver.termination_condition == TerminationCondition.optimal:
             st.session_state['res'] = model
@@ -109,7 +99,6 @@ def run_optimization_process():
     except Exception as e:
         st.error(f"⚠️ 오류: {str(e)}")
 
-# 안전하게 격리 가공되어 예약 전달된 변경 요구사항 자동 수행부
 if st.session_state['trigger_reoptimize']:
     st.session_state['trigger_reoptimize'] = False
     run_optimization_process()
