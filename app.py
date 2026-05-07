@@ -1,87 +1,66 @@
 import streamlit as st
 from pyomo.environ import TerminationCondition, NonNegativeIntegers, NonNegativeReals
-
 from ai_consultant import get_ai_consultant, get_ai_analysis
 from optimization_engine import solve_production_plan
-from ui_components import (
-    render_sidebar, render_supply_demand_tab, 
-    render_risk_efficiency_tab, render_data_master_tab
-)
+from ui_components import render_sidebar, render_supply_demand_tab, render_risk_efficiency_tab, render_data_master_tab
 
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
-# 1. 기초 파라미터 이니셜라이징
+# 1. 기초 데이터 및 락(Lock) 초기화 [cite: 173, 174, 175]
 param_defaults = {
-    'opt_mode': "정수계획법(IP)", 'enable_sub': True, 'std_time': 4.0, 'working_days': 20, 'ot_limit': 10,
-    'max_util': 100.0, 'min_inv': 0.0, 'max_cost': 999999.0, 'v_c_reg': 640.0, 'v_c_ot': 6.0,
-    'v_c_h': 300.0, 'v_c_l': 500.0, 'v_c_inv': 2.0, 'v_c_back': 5.0, 'v_c_mat': 10.0, 'v_c_sub': 30.0,
-    'v_w_init': 80.0, 'v_i_init': 1000.0, 'v_i_final': 500.0, 'demand_raw': "1600, 3000, 3200, 3800, 2200, 2200"
+    'opt_mode': "정수계획법(IP)", 'enable_sub': True, 'std_time': 4.0, 'max_util': 100.0, 'min_inv': 0.0, 'max_cost': 999999.0,
+    'v_c_reg': 640.0, 'v_c_ot': 6.0, 'v_c_h': 300.0, 'v_c_l': 500.0, 'v_c_inv': 2.0, 'v_c_back': 5.0, 'v_c_mat': 10.0, 'v_c_sub': 30.0,
+    'v_w_init': 80.0, 'v_i_init': 1000.0, 'v_i_final': 500.0, 'working_days': 20, 'ot_limit': 10,
+    'demand_raw': "1600, 3000, 3200, 3800, 2200, 2200"
 }
 for k, v in param_defaults.items():
     if k not in st.session_state: st.session_state[k] = v
-
-# AI 자동 수정을 위한 버퍼 처리
 if st.session_state.get('pending_updates'):
     for pk, pval in st.session_state['pending_updates'].items(): st.session_state[pk] = pval
     st.session_state['pending_updates'] = {}; st.session_state['trigger_reoptimize'] = True
 
-# 2. 보안 잠금(Lock) 초기 설정 (사용자 요구 13종 대거 반영)
-initial_locked_keys = {
-    'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 'v_c_mat', 'v_c_back', 
-    'std_time', 'opt_mode', 'enable_sub', 'v_i_final', 'max_util', 'min_inv', 'max_cost'
-}
+# 13종 보안 잠금 설정
+initial_locked_keys = {'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 'v_c_mat', 'v_c_back', 'std_time', 'opt_mode', 'enable_sub', 'v_i_final', 'max_util', 'min_inv', 'max_cost', 'lock_demand_raw'}
 for pk in initial_locked_keys:
-    if f"lock_{pk}" not in st.session_state: st.session_state[f"lock_{pk}"] = True
-if "lock_demand_raw" not in st.session_state: st.session_state["lock_demand_raw"] = True
+    lk = pk if pk.startswith('lock_') else f"lock_{pk}"
+    if lk not in st.session_state: st.session_state[lk] = True
 
-# 상태값 초기화
 for key in ['messages', 'success', 'utils', 'trigger_reoptimize', 'ai_analysis']:
     if key not in st.session_state: st.session_state[key] = [] if key == 'messages' else None
 
-# 3. 사이드바 및 최적화 실행
-demand, enable_sub, std_time, working_days, ot_limit = render_sidebar()
+# 2. 사이드바 및 실행
+demand, enable_sub, std_time = render_sidebar()
 
 def run_optimization():
     st.session_state['success'] = False
     try:
         cur_domain = NonNegativeIntegers if "IP" in st.session_state['opt_mode'] else NonNegativeReals
-        m, sol = solve_production_plan(
-            demand, cur_domain, st.session_state['v_c_reg'], st.session_state['v_c_ot'], 
+        m, sol = solve_production_plan(demand, cur_domain, st.session_state['v_c_reg'], st.session_state['v_c_ot'], 
             st.session_state['v_c_h'], st.session_state['v_c_l'], st.session_state['v_c_inv'], st.session_state['v_c_back'], 
             st.session_state['v_c_mat'], st.session_state['v_c_sub'], st.session_state['std_time'], st.session_state['working_days'], 
             st.session_state['ot_limit'], st.session_state['v_w_init'], st.session_state['v_i_init'], st.session_state['v_i_final'], 
-            st.session_state['enable_sub'], st.session_state['max_util'], st.session_state['min_inv'], st.session_state['max_cost']
-        )
+            st.session_state['enable_sub'], st.session_state['max_util'], st.session_state['min_inv'], st.session_state['max_cost'])
         if sol.solver.termination_condition == TerminationCondition.optimal:
             st.session_state['res'] = m; st.session_state['success'] = True
             st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
-            # [🚨 복구]: 최적화 직후 AI 분석 리포트 생성
-            ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
-            st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
-            st.toast("✅ 전략적 생산계획 수립 및 AI 분석 완료!")
-        else: st.error("❌ 최적해 없음. 제약을 완화해 주세요.")
-    except Exception as e: st.error(f"⚠️ 시스템 런타임 오류: {str(e)}")
+            ctx = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}"
+            st.session_state['ai_analysis'] = get_ai_analysis(ctx)
+            st.toast("✅ 수립 완료!")
+        else: st.error("❌ 최적해 없음. 제약을 완화하세요.")
+    except Exception as e: st.error(f"⚠️ 시스템 오류: {str(e)[:100]}")
 
 if st.session_state.get('trigger_reoptimize'):
     st.session_state['trigger_reoptimize'] = False; run_optimization()
 
-# 4. 4단 전문 탭 UI 배치
 t1, t2, t3, t4 = st.tabs(["📊 공급망 운영", "📉 리스크/효율", "📋 데이터 마스터", "💬 AI 전략 상담방"])
-
 with t1:
-    if st.button("🚀 생산계획 수립 실행"): run_optimization()
-    if st.session_state.get('success'):
-        render_supply_demand_tab(st.session_state['res'], st.session_state['utils'], demand)
-
+    if st.button("🚀 실행"): run_optimization()
+    if st.session_state['success']: render_supply_demand_tab(st.session_state['res'], st.session_state['utils'], demand)
 with t2:
-    if st.session_state.get('success'):
-        render_risk_efficiency_tab(st.session_state['res'], st.session_state['utils'], demand)
-
+    if st.session_state['success']: render_risk_efficiency_tab(st.session_state['res'], st.session_state['utils'], demand)
 with t3:
-    if st.session_state.get('success'):
-        render_data_master_tab(st.session_state['res'], st.session_state['utils'], demand)
-
+    if st.session_state['success']: render_data_master_tab(st.session_state['res'], st.session_state['utils'], demand)
 with t4:
     st.subheader("💬 AI 전략 상담방")
     if st.button("🧹 초기화"): st.session_state.messages = []; st.rerun()
@@ -91,8 +70,10 @@ with t4:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"):
+            # 상담방에 전달할 락 상태 명세서 생성
+            l_stat = {k: st.session_state.get(f"lock_{k}", False) for k in ['max_util', 'min_inv', 'max_cost', 'enable_sub']}
             u_str = ", ".join([f"{v:.1f}%" for v in st.session_state['utils']]) if st.session_state['utils'] else "N/A"
-            ctx = f"가동률:[{u_str}] | 비용:{st.session_state['res'].cost() if st.session_state['res'] else 'N/A'}"
+            ctx = f"가동률:[{u_str}] | 비용:{st.session_state['res'].cost() if st.session_state['success'] else 'N/A'} | 고정상태:{l_stat}"
             res = get_ai_consultant(prompt, ctx)
             st.markdown(res); st.session_state.messages.append({"role": "assistant", "content": res})
         if st.session_state.get('param_updated_by_ai'):
