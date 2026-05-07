@@ -127,6 +127,6 @@ def render_risk_analysis(utils, demand):
     가동률 분석 전용 area 차트를 그리는 컴포넌트 함수
     """
     st.subheader("⚠️ 운영 리스크 분석 (가동률)")
-    fig_risk = px.area(x=list(range(1,len(demand)+1)), y=utils, title="生産 가동률 추이 (%)", markers=True)
+    fig_risk = px.area(x=list(range(1,len(demand)+1)), y=utils, title="가동률 추이 (%)", markers=True)
     fig_risk.add_hline(y=100, line_dash="dot", line_color="red", annotation_text="위험(100%)", annotation_position="bottom right")
     st.plotly_chart(fig_risk, use_container_width=True)
