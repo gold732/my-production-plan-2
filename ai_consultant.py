@@ -4,34 +4,10 @@ import random
 import json
 
 def update_dashboard_parameter(parameter_key: str, new_value: str) -> str:
-    """대시보드의 제어판 입력 파라미터(비용 설정, 공정 제약 설정, 운영 초기값 등)를 동적으로 변경합니다. 
-    사용자가 특정 운영 목적(비용 절감, 가동률 과부하 해소 등)을 달성해달라고 지시하거나, 
-    수학적으로 최적해를 찾을 수 없는(Infeasible) 상황을 해결하기 위해 이 도구를 호출하십시오.
-    
-   [💡 AI 필독 지침]
-    1. 'max_util'(가동률)이나 'max_cost'(예산)가 고정(Lock)되어 변경할 수 없다면, 
-       즉시 'working_days'(가동일)나 'ot_limit'(연장근로 한도) 같은 대안 변수를 수정하여 최적해를 찾으십시오.
-    2. 특정 값이 고정되어 수정 거부 메시지가 나오면, 포기하지 말고 다른 '고정되지 않은' 변수를 조합하십시오.
-
-    Args:
-        parameter_key: 변경할 대상 파라미터의 고유 키 명칭. 
-                       정확히 지정 가능한 종류: 
-                       - 'opt_mode' (수리 알고리즘 유형 변경)
-                       - 'enable_sub' (외주 하청 조율 여부 변경)
-                       - 'std_time' (공정당 표준 공수), 'working_days' (월 가동일), 'ot_limit' (연장근로 한도)
-                       - 'max_util' (최대 허용 가동률 제한 수치 %), 'min_inv' (최소 유지 재고량 수치 ea)
-                       - 'max_cost' (최대 허용 총 운영 비용 상한 수치 천원)
-                       - 'v_c_reg', 'v_c_ot', 'v_c_h', 'v_c_l', 'v_c_inv', 'v_c_back', 'v_c_mat', 'v_c_sub' (비용 인자 계수들)
-                       - 'v_w_init', 'v_i_init', 'v_i_final' (운영 초기 설정값들)
-        new_value: 반영하고자 하는 새로운 값의 문자열 표현. 
-                   **[⚠️ 중요 준수 사항]**: 
-                   - 'opt_mode' 제어 시 반드시 문자열인 '정수계획법(IP)' 또는 '선형계획법(LP)' 중 하나만 입력하십시오.
-                   - 'enable_sub' 제어 시 반드시 문자열인 'True' 또는 'False'로 전달하십시오.
-                   - 수치형 변수 제어 시 반드시 숫자로만 이루어진 문자열 기입하십시오.
-    """
+    """대시보드의 제어판 입력 파라미터를 동적으로 변경합니다."""
     lock_key = f"lock_{parameter_key}"
     if st.session_state.get(lock_key, False):
-        return f"❌ 변경 거부: '{parameter_key}' 파라미터는 사용자가 [고정] 상태로 잠금해 두었으므로 수정이 불가능합니다. 고정되지 않은 다른 '변경가능' 변수들을 조합하십시오."
+        return f"❌ 변경 거부: '{parameter_key}' 파라미터는 사용자가 [고정] 상태로 잠금해 두었으므로 수정이 불가능합니다."
     
     try:
         if parameter_key == 'enable_sub':
@@ -48,22 +24,21 @@ def update_dashboard_parameter(parameter_key: str, new_value: str) -> str:
         st.session_state['pending_updates'][parameter_key] = val
         st.session_state['param_updated_by_ai'] = True
         
-        # [RPD 최적화] AI가 값을 수정했으므로, 리로드 후 자동 분석(get_ai_analysis) 호출을 한 번 건너뜀
+        # AI가 파라미터를 직접 수정했으므로, 리로드 후 자동 분석 호출을 건너뜀 (RPD 절감)
         st.session_state['skip_analysis'] = True
         
-        return f"✅ 예약 성공: '{parameter_key}' 파라미터 값이 최적 연산을 위해 '{val}'로 안전하게 버퍼에 대기 등록되었습니다."
+        return f"✅ 예약 성공: '{parameter_key}' -> '{val}'"
     except Exception as e:
         return f"❌ 오류: 값 타입 변환 실패 ({str(e)})"
 
 
 def get_ai_analysis(context_summary):
-    """경영진 리포트를 생성합니다. Flash Lite를 우선 사용합니다."""
+    """경영진 리포트를 생성합니다. (Lite-First 적용)"""
     keys = st.secrets.get("GEMINI_KEYS", [])
     if not keys: return None
     available_keys = list(keys)
     random.shuffle(available_keys)
     
-    # RPD 절감을 위해 Lite 모델을 우선적으로 시도
     models_to_try = ['gemini-2.5-flash-lite', 'gemini-2.5-flash']
     last_error = "등록된 API 키가 없습니다."
 
@@ -72,45 +47,32 @@ def get_ai_analysis(context_summary):
         for model_id in models_to_try:
             try:
                 model = genai.GenerativeModel(model_id)
-                prompt = f"""당신은 생산관리 전문가입니다. 제공된 S&OP 최적화 결과 데이터를 정밀하게 분석하여 경영진을 위한 종합 진단 보고서를 JSON 형태로 작성하세요.
+                prompt = f"""당신은 생산관리 전문가입니다. 제공된 데이터를 분석하여 JSON 리포트를 작성하세요.
                 데이터: {context_summary}
-                **경고 지침**: 특정 월의 가동률이 100%에 도달하면 이는 비현실적인 가동 계획(Burnout 리스크)임을 리포트에 반드시 명시하십시오.
-
-                반환 형식은 반드시 아래의 JSON 스키마 구조를 100% 준수해야 합니다:
+                
+                반환 형식(JSON):
                 {{
-                    "risk_level": "🟢 안전 (가동률 적정 및 비용 안정)", "🟡 주의 (부분적 부하 또는 재고 불안정)", "🚨 심각 (가동률 과부하 및 운영 리스크)" 중 하나 선택,
-                    "bottleneck_month": "가동률이 과부하 상태이거나 제약에 걸리는 핵심 월 (예: '3월', 없으면 '없음')",
-                    "summary": "최적화 결과에 대한 핵심 요약 브리핑 문구 (2~3문장). 가동률 100% 발생 시 강력 경고 포함.",
-                    "recommendation": "운영 효율성 개선 및 리스크 완화를 위한 실무적 핵심 권고사항 (1~2문장)"
+                    "risk_level": "🟢 안전 / 🟡 주의 / 🚨 심각",
+                    "bottleneck_month": "병목 월",
+                    "summary": "핵심 요약 (2~3문장)",
+                    "recommendation": "권고사항 (1~2문장)"
                 }}"""
                 
                 response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-                raw_text = response.text.strip()
-                if raw_text.startswith("```"):
-                    raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+                raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
                 return json.loads(raw_text)
             except Exception as e:
                 last_error = str(e)
-                if any(msg in last_error.lower() for msg in ["api_key", "quota", "exhausted", "429", "403"]):
+                if any(msg in last_error.lower() for msg in ["quota", "429", "limit"]):
                     continue
-                else:
-                    return {
-                        "risk_level": "🚨 시스템 오류",
-                        "bottleneck_month": "연산 중단",
-                        "summary": f"AI 분석 엔진 내부 런타임 오류: {last_error}",
-                        "recommendation": "시스템 관리자에게 에러 로그 확인을 요청하십시오."
-                    }
-    return {
-        "risk_level": "🟡 분석 불가", "bottleneck_month": "확인 불가",
-        "summary": f"모든 API 키의 할당량이 소진되었습니다: {last_error}",
-        "recommendation": "수동으로 대시보드 지표를 확인해 주십시오."
-    }
+                return {"risk_level": "🚨 오류", "bottleneck_month": "-", "summary": f"에러: {last_error}", "recommendation": "확인 요청"}
+    return {"risk_level": "🟡 제한", "bottleneck_month": "-", "summary": "RPD 초과", "recommendation": "수동 확인"}
 
 
 def get_ai_consultant(prompt, context_summary):
-    """S&OP 전문가 AI 컨설턴트: Flash Lite를 우선 사용합니다."""
+    """S&OP 전문가 AI 컨설턴트: 상황에 따른 유연한 제약 조건을 적용합니다."""
     keys = st.secrets.get("GEMINI_KEYS", [])
-    if not keys: return "⚠️ Secrets에 'GEMINI_KEYS'를 설정해주세요."
+    if not keys: return "⚠️ Secrets 설정 확인 필요"
     
     available_keys = list(keys)
     random.shuffle(available_keys)
@@ -118,20 +80,20 @@ def get_ai_consultant(prompt, context_summary):
     target_params = ['std_time', 'working_days', 'ot_limit', 'max_util', 'min_inv', 'max_cost', 'enable_sub', 'opt_mode']
     lock_status = {p: st.session_state.get(f"lock_{p}", False) for p in target_params}
     
-    system_instruction = f"""당신은 S&OP 생산관리 전문가이자 제어판을 완벽하게 통제하는 컨트롤 에이전트입니다.
+    # [수정] 복구(Infeasible) 시에는 과감한 조정을, 일반 상황엔 절제를 지시
+    system_instruction = f"""당신은 S&OP 생산관리 전문가이자 컨트롤 에이전트입니다.
 
 [현재 운영 환경 데이터]
 {context_summary}
 
 [파라미터 잠금(Lock) 현황]
-{lock_status}
-※ 중요: 'True'인 항목은 사용자가 고정한 것이므로 절대 수정할 수 없습니다. 
-반드시 'False'인 항목들만 조절하여 최적의 운영 방안을 찾으십시오.
+{lock_status} (True 항목은 절대 수정 금지)
 
 [전략적 제어 규칙]
-1. **RPD 최적화**: 효율적인 리소스 관리를 위해 한 번의 요청에 **최대 2개까지만** 파라미터를 수정하십시오.
-2. **논리적 우회 탐색**: 예산(max_cost)이나 가동률(max_util)이 고정되어 수정할 수 없다면, 즉시 'working_days'(가동일)를 늘리거나 'ot_limit'(연장근로)을 조정하는 등 '변경 가능한(False)' 변수들을 조합하여 문제를 해결하십시오.
-3. **결과 브리핑**: 파라미터를 수정한 후에는 어떤 값을 왜 바꿨는지 짧고 명확하게 설명하십시오."""
+1. **문제 해결 우선 (가장 중요)**: 현재 상태가 'Infeasible(해 없음)'인 경우, RPD 절약을 위해 **단 한 번의 호출로 해법이 나올 수 있도록** 필요한 모든 변수(개수 제한 없음)를 과감하게 조정하십시오. 
+2. **일반 운영 모드**: 해가 존재하는 상태에서 성능 최적화 요청 시에는 한 번에 2~3개 이내의 핵심 변수만 조정하십시오.
+3. **논리적 우회 전략**: 특정 값이 잠겨있다면 즉시 대안 변수(예: 외주 허용, 가동일 상향 등)를 조합하십시오.
+4. **결과 브리핑**: 수정한 파라미터와 그로 인해 예상되는 변화를 명확하게 설명하십시오."""
 
     models_to_try = ['gemini-2.5-flash-lite', 'gemini-2.5-flash']
     last_error = "등록된 API 키가 없습니다."
@@ -148,12 +110,12 @@ def get_ai_consultant(prompt, context_summary):
                     for part in response.candidates[0].content.parts:
                         if hasattr(part, 'text') and part.text:
                             return part.text
-                return "✅ 파라미터 조정을 완료했습니다. 대시보드에서 업데이트된 결과를 확인하세요."
+                return "✅ 파라미터 조정을 완료했습니다. 대시보드를 확인하세요."
             except Exception as e:
                 last_error = str(e)
-                if any(msg in last_error.lower() for msg in ["api_key", "quota", "exhausted", "429", "403"]):
+                if any(msg in last_error.lower() for msg in ["quota", "429", "limit"]):
                     continue
                 else:
                     return f"❌ AI 구동 오류: {last_error}"
                     
-    return f"❌ AI 가동 실패 (최종 에러: {last_error})"
+    return f"❌ 가동 실패: {last_error}"
