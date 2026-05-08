@@ -38,7 +38,7 @@ for key in ['messages', 'success', 'utils', 'trigger_reoptimize', 'ai_analysis']
 demand, enable_sub, std_time, working_days, ot_limit = render_sidebar()
 
 def run_optimization():
-    """제약 완화 메커니즘을 포함한 최적화 실행 및 AI 분석 연동"""
+    """제약 완화 메커니즘을 포함한 최적화 실행 엔진"""
     st.session_state['success'] = False
     
     relaxation_steps = [
@@ -76,7 +76,7 @@ def run_optimization():
                     st.warning(f"🚨 [복구] '{step['name']}' 조건에서 해를 찾았습니다.")
                     for k, v in step["changes"].items(): st.session_state[k] = v
                 
-                # [AI 진단 리포트 생성 및 세션 저장]
+                # AI 진단 리포트 생성 (내부적으로 Lite -> Flash 자동 전환됨)
                 ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
                 st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
                 st.toast(f"✅ {step['name']} 수립 완료")
@@ -103,7 +103,7 @@ with t4:
     if st.button("🧹 초기화"): st.session_state.messages = []; st.rerun()
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
-    if prompt := st.chat_input("상담이 필요하신가요?"):
+    if prompt := st.chat_input("의사결정에 필요한 조언을 구하세요"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"):
