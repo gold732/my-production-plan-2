@@ -21,8 +21,6 @@ param_defaults = {
 for k, v in param_defaults.items():
     if k not in st.session_state: st.session_state[k] = v
 
-# [정리] AI 자동 수정 버퍼(pending_updates) 로직 제거됨 (코드 복구 알고리즘이 대체)
-
 # 2. 보안 잠금(Lock) 설정
 initial_locked_keys = {
     'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 'v_c_mat', 'v_c_back', 
@@ -40,7 +38,7 @@ for key in ['messages', 'success', 'utils', 'trigger_reoptimize', 'ai_analysis']
 demand, enable_sub, std_time, working_days, ot_limit = render_sidebar()
 
 def run_optimization():
-    """제약 완화 메커니즘이 포함된 고성능 최적화 실행 엔진"""
+    """제약 완화 메커니즘을 포함한 최적화 실행 및 AI 분석 연동"""
     st.session_state['success'] = False
     
     relaxation_steps = [
@@ -75,16 +73,17 @@ def run_optimization():
                 st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
                 
                 if step["name"] != "사용자 지정 조건":
-                    st.warning(f"🚨 [시스템 복구] '{step['name']}' 적용으로 최적해를 산출했습니다.")
+                    st.warning(f"🚨 [복구] '{step['name']}' 조건에서 해를 찾았습니다.")
                     for k, v in step["changes"].items(): st.session_state[k] = v
                 
+                # [AI 진단 리포트 생성 및 세션 저장]
                 ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
                 st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
                 st.toast(f"✅ {step['name']} 수립 완료")
                 found_solution = True; break
         except: continue
 
-    if not found_solution: st.error("❌ 복구 실패: 제약 조건 완화로도 해를 찾을 수 없습니다.")
+    if not found_solution: st.error("❌ 복구 실패: 해를 찾을 수 없습니다.")
 
 # 4. 탭 UI 배치
 t1, t2, t3, t4 = st.tabs(["📊 공급망 운영", "📉 리스크/효율", "📋 데이터 마스터", "💬 AI 전략 상담방"])
@@ -104,7 +103,7 @@ with t4:
     if st.button("🧹 초기화"): st.session_state.messages = []; st.rerun()
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
-    if prompt := st.chat_input("의사결정에 필요한 조언을 구하세요"):
+    if prompt := st.chat_input("상담이 필요하신가요?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"):
@@ -113,4 +112,3 @@ with t4:
             ctx = f"현황 - 가동률:[{u_str}], 총비용:{cost_val}"
             res = get_ai_consultant(prompt, ctx)
             st.markdown(res); st.session_state.messages.append({"role": "assistant", "content": res})
-        # [정리] param_updated_by_ai 체크 로직 제거됨
