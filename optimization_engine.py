@@ -27,7 +27,7 @@ def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, 
         m.c.add(m.P[t] <= cap_reg + (1/stime)*m.O[t]) 
         m.c.add(m.O[t] <= ot_lim * m.W[t])
         
-        # 재고 평형 제약: It = It-1 + Pt + Ct - Dt - St-1 + St
+        # 재고 평형 제약: It = It-1 + Pt + Ct - D[t-1] - St-1 + St
         m.c.add(m.I[t] == m.I[t-1] + m.P[t] + m.C[t] - D[t-1] - m.S[t-1] + m.S[t]) 
         
         if not use_sub: m.c.add(m.C[t] == 0)
