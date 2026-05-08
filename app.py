@@ -33,15 +33,15 @@ if "lock_demand_raw" not in st.session_state: st.session_state["lock_demand_raw"
 for key in ['messages', 'success', 'utils', 'ai_analysis']:
     if key not in st.session_state: st.session_state[key] = [] if key == 'messages' else None
 
-# 3. 사이드바 및 실행 엔진
+# 3. 사이드바 렌더링
 demand, enable_sub, std_time, working_days, ot_limit = render_sidebar()
 
 def run_optimization():
-    """임금/제약 동적 탐색 루프가 포함된 강화된 실행 엔진"""
+    """안전한 상태 업데이트를 포함한 코드 기반 탐색 엔진"""
     st.session_state['success'] = False
     
-    # [Step 1] 사용자 지정 원본 조건으로 시도
-    def try_solve(p_overrides={}):
+    # 내부 헬퍼 함수
+    def solve_with_params(p_overrides):
         p = {
             "v_c_reg": st.session_state['v_c_reg'], "v_c_sub": st.session_state['v_c_sub'],
             "max_util": st.session_state['max_util'], "max_cost": st.session_state['max_cost'],
@@ -49,7 +49,6 @@ def run_optimization():
             "ot_limit": st.session_state['ot_limit']
         }
         p.update(p_overrides)
-        
         cur_domain = NonNegativeIntegers if "IP" in st.session_state['opt_mode'] else NonNegativeReals
         return solve_production_plan(
             demand, cur_domain, p['v_c_reg'], st.session_state['v_c_ot'], 
@@ -59,55 +58,46 @@ def run_optimization():
             p['enable_sub'], p['max_util'], p['min_inv'], p['max_cost']
         )
 
-    # 기본 실행
-    m, sol = try_solve()
-    
+    # 1차 시도
+    m, sol = solve_with_params({})
     if sol.solver.termination_condition == TerminationCondition.optimal:
-        finalize_optimization(m, "✅ 사용자 지정 조건 수립 완료")
+        finalize_and_save(m)
         return
 
-    # [Step 2] 실패 시: 동적 임금/비용 탐색 (Sensitivity Search)
-    st.info("🤖 현재 조건에서 해가 없습니다. 시스템이 가능한 파라미터 범위를 탐색합니다...")
-    
-    # 임금을 90%부터 10%씩 줄여보며 해를 찾음
-    for ratio in [0.9, 0.7, 0.5, 0.3, 0.1, 0.01]:
+    # 실패 시 코드 기반 파라미터 탐색 루프 (StreamlitAPIException 방지를 위해 session_state 직접 수정 자제)
+    found_p = None
+    # 임금 탐색
+    for ratio in [0.8, 0.6, 0.4, 0.2, 0.1, 0.05]:
         test_wage = round(st.session_state['v_c_reg'] * ratio, 2)
-        m, sol = try_solve({"v_c_reg": test_wage})
+        m, sol = solve_with_params({"v_c_reg": test_wage})
         if sol.solver.termination_condition == TerminationCondition.optimal:
-            st.session_state['v_c_reg'] = test_wage
-            finalize_optimization(m, f"🚨 [자동 보정] 정규 임금을 기존 대비 {int(ratio*100)}% 수준({test_wage})으로 조정하여 해를 찾았습니다.")
-            return
-
-    # [Step 3] 그래도 실패 시: 제약 완화 시퀀스
-    relaxations = [
-        {"max_util": 100.0, "name": "가동률 제한 해제 (100%)"},
-        {"max_cost": 99999999.0, "name": "예산 제약 해제"},
-        {"enable_sub": True, "min_inv": 0.0, "name": "외주 허용 및 최소 재고 해제"}
-    ]
+            found_p = {"v_c_reg": test_wage}; break
     
-    for relax in relaxations:
-        m, sol = try_solve(relax)
-        if sol.solver.termination_condition == TerminationCondition.optimal:
-            msg = f"🚨 [제약 완화] '{relax['name']}' 적용으로 해를 찾았습니다."
-            for k, v in relax.items(): 
-                if k != "name": st.session_state[k] = v
-            finalize_optimization(m, msg)
-            return
+    # 제약 완화 탐색 (임금으로 안될 경우)
+    if not found_p:
+        for relax in [{"max_util": 100.0}, {"max_cost": 99999999.0}, {"enable_sub": True}]:
+            m, sol = solve_with_params(relax)
+            if sol.solver.termination_condition == TerminationCondition.optimal:
+                found_p = relax; break
 
-    st.error("❌ 모든 탐색 시도 실패: 수요가 너무 높거나 기초 자산이 부족하여 물리적으로 해를 산출할 수 없습니다.")
+    if found_p:
+        # 찾은 값을 세션에 저장하고 리런하여 위젯과 동기화 (오류 방지 핵심)
+        for k, v in found_p.items():
+            st.session_state[k] = v
+        st.rerun() 
+    else:
+        st.error("❌ 복구 실패: 해를 찾을 수 없습니다.")
 
-def finalize_optimization(m, success_msg):
-    """성공 시 공통 처리 로직"""
+def finalize_and_save(m):
+    """성공 시 결과 저장 및 분석 호출"""
     st.session_state['res'] = m
     st.session_state['success'] = True
     st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
-    
-    ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
+    ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}"
     st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
-    st.success(success_msg)
-    st.toast("생산계획 최적화 완료")
+    st.success("✅ 최적화 성공")
 
-# UI 탭 배치
+# 4. UI 탭 배치
 t1, t2, t3, t4 = st.tabs(["📊 공급망 운영", "📉 리스크/효율", "📋 데이터 마스터", "💬 AI 전략 상담방"])
 
 with t1:
@@ -125,7 +115,7 @@ with t4:
     if st.button("🧹 초기화"): st.session_state.messages = []; st.rerun()
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
-    if prompt := st.chat_input("의사결정에 필요한 조언을 구하세요"):
+    if prompt := st.chat_input("상담 내용을 입력하세요"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"):
