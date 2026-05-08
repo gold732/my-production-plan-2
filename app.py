@@ -11,7 +11,7 @@ from ui_components import (
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
-# 초기값 설정 보존
+# 1. 기초 파라미터 이니셜라이징 (기존 로직 보존)
 param_defaults = {
     'opt_mode': "정수계획법(IP)", 'enable_sub': True, 'std_time': 4.0, 'working_days': 20, 'ot_limit': 10,
     'max_util': 100.0, 'min_inv': 0.0, 'max_cost': 999999.0, 'v_c_reg': 640.0, 'v_c_ot': 6.0,
@@ -21,78 +21,107 @@ param_defaults = {
 for k, v in param_defaults.items():
     if k not in st.session_state: st.session_state[k] = v
 
-# 보안 잠금 설정
+# 2. 보안 잠금 설정
 initial_locked_keys = {'v_w_init', 'v_i_init', 'v_c_sub', 'v_c_inv', 'v_c_mat', 'v_c_back', 'std_time', 'opt_mode', 'enable_sub', 'v_i_final', 'max_util', 'min_inv', 'max_cost'}
 for pk in initial_locked_keys:
     if f"lock_{pk}" not in st.session_state: st.session_state[f"lock_{pk}"] = True
 if "lock_demand_raw" not in st.session_state: st.session_state["lock_demand_raw"] = True
 
-for key in ['messages', 'success', 'utils', 'ai_analysis']:
+for key in ['messages', 'success', 'utils', 'trigger_reoptimize', 'ai_analysis']:
     if key not in st.session_state: st.session_state[key] = [] if key == 'messages' else None
 
-demand, enable_sub, std_time, working_days, ot_limit = render_sidebar()
-
-def run_optimization():
-    """알고리즘 기반 단계적 제약 완화 복구 로직 (AI 의존 제거)"""
+# ---------------------------------------------------------
+# [핵심] 최적화 함수 정의 (사이드바 렌더링 전 호출 가능하도록 구성)
+# ---------------------------------------------------------
+def perform_optimization_flow():
+    """알고리즘 기반 단계적 제약 완화 복구 (AI 의존 제거)"""
     st.session_state['success'] = False
+    demand = [float(d.strip()) for d in st.session_state['demand_raw'].split(",") if d.strip()]
     
-    # 현재 설정값 복사
-    temp_params = {
-        'enable_sub': st.session_state['enable_sub'],
-        'max_util': st.session_state['max_util'],
-        'working_days': st.session_state['working_days'],
-        'ot_limit': st.session_state['ot_limit']
-    }
+    # 가변 파라미터 임시 저장
+    t_sub = st.session_state['enable_sub']
+    t_util = st.session_state['max_util']
+    t_ot = st.session_state['ot_limit']
+    t_days = st.session_state['working_days']
     
-    attempts = 0
-    max_attempts = 5
-    
-    while attempts < max_attempts:
-        try:
-            cur_domain = NonNegativeIntegers if "IP" in st.session_state['opt_mode'] else NonNegativeReals
-            m, sol = solve_production_plan(
-                demand, cur_domain, st.session_state['v_c_reg'], st.session_state['v_c_ot'], 
-                st.session_state['v_c_h'], st.session_state['v_c_l'], st.session_state['v_c_inv'], st.session_state['v_c_back'], 
-                st.session_state['v_c_mat'], st.session_state['v_c_sub'], st.session_state['std_time'], 
-                temp_params['working_days'], temp_params['ot_limit'], st.session_state['v_w_init'], 
-                st.session_state['v_i_init'], st.session_state['v_i_final'], temp_params['enable_sub'], 
-                temp_params['max_util'], st.session_state['min_inv'], st.session_state['max_cost']
-            )
+    for attempt in range(5): # 최대 5단계 완화 시도
+        cur_domain = NonNegativeIntegers if "IP" in st.session_state['opt_mode'] else NonNegativeReals
+        m, sol = solve_production_plan(
+            demand, cur_domain, st.session_state['v_c_reg'], st.session_state['v_c_ot'], 
+            st.session_state['v_c_h'], st.session_state['v_c_l'], st.session_state['v_c_inv'], st.session_state['v_c_back'], 
+            st.session_state['v_c_mat'], st.session_state['v_c_sub'], st.session_state['std_time'], 
+            t_days, t_ot, st.session_state['v_w_init'], st.session_state['v_i_init'], st.session_state['v_i_final'], 
+            t_sub, t_util, st.session_state['min_inv'], st.session_state['max_cost']
+        )
+        
+        if sol.solver.termination_condition == TerminationCondition.optimal:
+            # 성공 시 최종 파라미터를 세션에 업데이트 (위젯 렌더링 전이므로 안전)
+            st.session_state['enable_sub'] = t_sub
+            st.session_state['max_util'] = t_util
+            st.session_state['ot_limit'] = t_ot
+            st.session_state['working_days'] = t_days
             
-            if sol.solver.termination_condition == TerminationCondition.optimal:
-                # 해를 찾으면 해당 값을 세션에 반영하고 종료
-                for k, v in temp_params.items(): st.session_state[k] = v
-                st.session_state['res'] = m
-                st.session_state['success'] = True
-                st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*temp_params['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
-                
-                # 분석만 AI에게 맡김
-                ctx = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}"
-                st.session_state['ai_analysis'] = get_ai_analysis(ctx)
-                if attempts > 0: st.success(f"✅ {attempts}단계 제약 완화를 통해 최적해를 찾아냈습니다.")
-                break
-            else:
-                # [알고리즘 복구 순서]
-                attempts += 1
-                if attempts == 1 and not temp_params['enable_sub']:
-                    temp_params['enable_sub'] = True # 1순위: 외주 허용
-                elif attempts == 2:
-                    temp_params['max_util'] = 100.0 # 2순위: 가동률 제한 해제
-                elif attempts == 3:
-                    temp_params['ot_limit'] = 50.0 # 3순위: 연장근로 확대
-                elif attempts == 4:
-                    temp_params['working_days'] = 25.0 # 4순위: 가동일수 상향
-                else:
-                    st.error("❌ 모든 알고리즘적 완화 시도 후에도 해를 찾지 못했습니다. 기초 데이터를 확인하십시오.")
-                    break
-        except Exception as e:
-            st.error(f"시스템 오류: {e}")
-            break
+            st.session_state['res'] = m
+            st.session_state['success'] = True
+            st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*t_days*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
+            
+            # AI 분석 리포트 생성 (가성비 Flash-Lite 사용)
+            ctx = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}"
+            st.session_state['ai_analysis'] = get_ai_analysis(ctx)
+            if attempt > 0: st.toast(f"✅ {attempt}단계 완화로 해결!")
+            return
+        
+        # [단계적 완화 알고리즘]
+        if attempt == 0: t_sub = True # 1. 외주 허용
+        elif attempt == 1: t_util = 100.0 # 2. 가동률 제한 해제
+        elif attempt == 2: t_ot = 60.0 # 3. 연장근로 확대
+        elif attempt == 3: t_days = 25 # 4. 가동일수 증가
+        else: break
 
-# UI 및 탭 렌더링 (기존 로직 보존)
+    st.error("❌ 알고리즘 완화 시도 후에도 최적해를 찾지 못했습니다.")
+
+# ---------------------------------------------------------
+# [핵심] 위젯 렌더링 전 데이터 업데이트 로직 배치 (에러 방지)
+# ---------------------------------------------------------
+if st.session_state.get('trigger_reoptimize'):
+    st.session_state['trigger_reoptimize'] = False
+    perform_optimization_flow()
+
+# 사이드바 렌더링 (이미 세션값이 업데이트되어 위젯에 자동 반영됨)
+demand, _, _, _, _ = render_sidebar()
+
+# 탭 UI 배치 (기존 시각화 로직 100% 보존)
 t1, t2, t3, t4 = st.tabs(["📊 공급망 운영", "📉 리스크/효율", "📋 데이터 마스터", "💬 AI 전략 상담방"])
 
 with t1:
-    if st.button("🚀 생산계획 수립 실행"): run_optimization()
-    if st.session_state.get('success'): render_supply_demand_tab(st.session_state['res'], st.session_state['utils'], demand)
-# ... 나머지 t2, t3, t4 렌더링 로직 기존과 동일 (생략 없음)
+    if st.button("🚀 생산계획 수립 실행"):
+        perform_optimization_flow()
+        st.rerun() # 값 반영을 위해 1회 갱신
+    if st.session_state.get('success'):
+        render_supply_demand_tab(st.session_state['res'], st.session_state['utils'], demand)
+
+with t2:
+    if st.session_state.get('success'):
+        render_risk_efficiency_tab(st.session_state['res'], st.session_state['utils'], demand)
+
+with t3:
+    if st.session_state.get('success'):
+        render_data_master_tab(st.session_state['res'], st.session_state['utils'], demand)
+
+with t4:
+    # (기존 상담방 로직 보존)
+    st.subheader("💬 AI 전략 상담방")
+    if st.button("🧹 초기화"): st.session_state.messages = []; st.rerun()
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]): st.markdown(msg["content"])
+    if prompt := st.chat_input("조언을 구하세요"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): st.markdown(prompt)
+        with st.chat_message("assistant"):
+            u_str = ", ".join([f"{v:.1f}%" for v in st.session_state['utils']]) if st.session_state['utils'] else "N/A"
+            ctx = f"가동률:[{u_str}] | 비용:{st.session_state['res'].cost() if st.session_state['res'] else 'N/A'}"
+            res = get_ai_consultant(prompt, ctx)
+            st.markdown(res); st.session_state.messages.append({"role": "assistant", "content": res})
+        if st.session_state.get('param_updated_by_ai'):
+            st.session_state['param_updated_by_ai'] = False
+            st.rerun()
