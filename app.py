@@ -7,7 +7,7 @@ from optimization_engine import solve_production_plan
 from ui_components import (
     render_sidebar, render_supply_demand_tab, 
     render_risk_efficiency_tab, render_data_master_tab,
-    render_scenario_history_tab # 신규 추가
+    render_scenario_history_tab
 )
 
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
@@ -19,7 +19,7 @@ param_defaults = {
     'max_util': 100.0, 'min_inv': 0.0, 'v_c_reg': 640.0, 'v_c_ot': 6.0,
     'v_c_h': 300.0, 'v_c_l': 500.0, 'v_c_inv': 2.0, 'v_c_back': 5.0, 'v_c_mat': 10.0, 'v_c_sub': 30.0,
     'v_w_init': 80.0, 'v_i_init': 1000.0, 'v_i_final': 500.0, 'demand_raw': "1600, 3000, 3200, 3800, 2200, 2200",
-    'scenario_history': [] # 시나리오 저장을 위한 리스트 초기화
+    'scenario_history': []
 }
 for k, v in param_defaults.items():
     if k not in st.session_state: st.session_state[k] = v
@@ -46,35 +46,37 @@ def run_optimization():
             st.session_state['res'] = m; st.session_state['success'] = True
             st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
             
-            # --- [시나리오 이력 저장 로직] ---
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            avg_util = sum(st.session_state['utils']) / len(st.session_state['utils'])
-            total_cost = m.cost()
-            
+            # --- [시나리오 데이터 스냅샷 저장] ---
+            # 사용자의 요청에 따라 모든 비용 파라미터 및 제약 조건을 함께 저장
+            timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
             scenario_data = {
-                "시나리오명": f"Case_{timestamp}",
+                "시나리오명": f"Scenario_{timestamp}",
                 "알고리즘": st.session_state['opt_mode'],
-                "총 비용(k)": round(total_cost, 2),
-                "평균 가동률(%)": round(avg_util, 1),
+                "총 비용(k)": round(m.cost(), 2),
+                "평균 가동률(%)": round(sum(st.session_state['utils'])/len(st.session_state['utils']), 1),
                 "총 부재고(ea)": sum(m.S[t]() for t in range(1, len(demand)+1)),
-                "외주 허용": "YES" if enable_sub else "NO",
-                "수요 합계": sum(demand)
+                "외주 허용": "허용" if enable_sub else "차단",
+                # 임금 및 재고비 등 모든 파라미터 기록
+                "정규임금": st.session_state['v_c_reg'], "초과수당": st.session_state['v_c_ot'],
+                "재고유지비": st.session_state['v_c_inv'], "부재고비용": st.session_state['v_c_back'],
+                "고용비용": st.session_state['v_c_h'], "해고비용": st.session_state['v_c_l'],
+                "재료비": st.session_state['v_c_mat'], "외주비": st.session_state['v_c_sub'],
+                "최대허용가동률": st.session_state['max_util'], "최소재고량": st.session_state['min_inv']
             }
             st.session_state['scenario_history'].append(scenario_data)
-            # -------------------------------
-
-            ctx_summary = f"비용:{total_cost:,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
+            
+            ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
             st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
-            st.toast("✅ 전략적 생산계획 수립 및 AI 분석 완료!")
+            st.toast("✅ 시나리오 기록 및 AI 분석 완료!")
         else: 
-            st.error("❌ 최적해 없음: 현재 제약 조건 내에서는 수학적 해가 존재하지 않습니다. 파라미터를 조정하십시오.")
+            st.error("❌ 최적해 없음: 현재 제약 조건 내에서는 수학적 해가 존재하지 않습니다.")
             
     except Exception as e: st.error(f"⚠️ 시스템 런타임 오류: {str(e)}")
 
 if st.session_state.get('trigger_reoptimize'):
     st.session_state['trigger_reoptimize'] = False; run_optimization()
 
-# 3. 5단 전문 탭 UI 배치 (시나리오 이력 탭 추가)
+# 3. 5단 전문 탭 UI 배치
 t1, t2, t3, t4, t5 = st.tabs(["📊 공급망 운영", "📉 리스크/효율", "📋 데이터 마스터", "📜 시나리오 이력", "💬 AI 전략 상담방"])
 
 with t1:
