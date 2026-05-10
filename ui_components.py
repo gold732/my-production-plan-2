@@ -51,7 +51,7 @@ def render_sidebar():
     return demand, enable_sub, std_time, working_days, ot_limit
 
 def render_supply_demand_tab(m, utils, demand):
-    """1번 탭: 그래프 로직 완벽 복구"""
+    """1번 탭: 공급망 통합 흐름 및 인력 현황 그래프 부활"""
     if st.session_state.get('ai_analysis'):
         analysis = st.session_state['ai_analysis']
         st.markdown("### 🤖 AI 전문 컨설턴트 종합 진단 보고서")
@@ -84,6 +84,7 @@ def render_supply_demand_tab(m, utils, demand):
     fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
+    # --- [사용자 요청: 인력 현황 그래프 부활] ---
     st.subheader("👷 인력 최적 배치 및 고용/해고 트렌드")
     worker_counts = [int(m.W[t]()) for t in range(1, len(demand) + 1)]
     hired = [int(m.H[t]()) for t in range(1, len(demand) + 1)]
@@ -96,7 +97,7 @@ def render_supply_demand_tab(m, utils, demand):
     st.plotly_chart(fig_w, use_container_width=True)
 
 def render_risk_efficiency_tab(m, utils, demand):
-    """2번 탭: 리스크 가이드라인 로직 복구"""
+    """2번 탭: 리스크 진단 (번아웃 툴팁 간소화 버전)"""
     st.subheader("📉 생산 운영 리스크 및 효율성 종합 진단")
     c1, c2 = st.columns(2)
     with c1:
@@ -111,9 +112,6 @@ def render_risk_efficiency_tab(m, utils, demand):
         st.markdown("##### ⚠️ 생산 가동률 변동 추이")
         fig_u = px.area(x=[f"{t}월" for t in range(1,len(demand)+1)], y=utils, markers=True, labels={'y':'가동률 (%)','x':'월'})
         fig_u.add_hline(y=100, line_dash="solid", line_color="darkred", annotation_text="절대 한계선 (100%)")
-        max_limit = st.session_state.get('max_util', 100)
-        if max_limit < 100:
-            fig_u.add_hline(y=max_limit, line_dash="dot", line_color="orange", annotation_text="설정 상한")
         st.plotly_chart(fig_u, use_container_width=True)
 
     st.markdown("---")
@@ -124,7 +122,8 @@ def render_risk_efficiency_tab(m, utils, demand):
         burn = [((m.O[t]() / (ot_lim * m.W[t]())) * 100 if m.W[t]() > 0 and ot_lim > 0 else 0) for t in range(1, len(demand)+1)]
         fig_ot = px.bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=burn, labels={'y':'한도 대비 잠식률 (%)','x':'월'}, color=burn, color_continuous_scale="OrRd")
         fig_ot.add_hline(y=100, line_dash="dash", line_color="darkred", annotation_text="위험 임계점")
-        fig_ot.update_traces(hovertemplate="잠식률: %{y}%<extra></extra>") # 툴팁 최적화: 잠식률만 표시
+        # 툴팁에서 잠식률 수치만 나오도록 최적화
+        fig_ot.update_traces(hovertemplate="잠식률: %{y}%<extra></extra>")
         st.plotly_chart(fig_ot, use_container_width=True)
     with c4:
         st.markdown("##### 💸 단위 노무비 효율성 (천원/ea)")
@@ -134,9 +133,33 @@ def render_risk_efficiency_tab(m, utils, demand):
         st.plotly_chart(fig_unit, use_container_width=True)
 
 def render_data_master_tab(m, utils, demand):
+    """3번 탭: 데이터 명세"""
     st.subheader("📋 총괄생산계획 정밀 데이터 명세 (Raw Data)")
     ds = []
     for t in range(1, len(demand) + 1):
         ds.append({ "월": f"{t}월", "예상수요": demand[t-1], "자체생산": m.P[t](), "외주하청": m.C[t](), 
                     "인력수": m.W[t](), "연장근로(Hr)": m.O[t](), "재고량": m.I[t](), "부재고": m.S[t](), "가동률": f"{utils[t-1]:.1f}%" })
     st.dataframe(pd.DataFrame(ds).set_index("월"), use_container_width=True)
+
+def render_scenario_history_tab():
+    """4번 탭: 시나리오 이력 (누락되어 ImportError를 유발했던 함수 복구)"""
+    st.subheader("📜 최적화 시나리오 수행 이력")
+    if not st.session_state.get('scenario_history'):
+        st.info("아직 기록된 시나리오가 없습니다.")
+        return
+
+    with st.expander("📝 시나리오 이름 수정하기"):
+        history = st.session_state['scenario_history']
+        names = [s['시나리오명'] for s in history]
+        target_name = st.selectbox("수정할 시나리오 선택", names)
+        new_name = st.text_input("새로운 이름 입력", value=target_name)
+        if st.button("이름 업데이트"):
+            for s in history:
+                if s['시나리오명'] == target_name:
+                    s['시나리오명'] = new_name
+                    st.rerun()
+
+    full_df = pd.DataFrame(st.session_state['scenario_history'])
+    display_cols = ["시나리오명", "알고리즘", "총 비용(k)", "평균 가동률(%)", "총 부재고(ea)", "외주 허용"]
+    st.dataframe(full_df[display_cols], use_container_width=True)
+    st.plotly_chart(px.bar(full_df, x="시나리오명", y="총 비용(k)", color="알고리즘", title="시나리오별 비용 비교"), use_container_width=True)
