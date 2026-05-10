@@ -10,7 +10,7 @@ from ui_components import (
     render_scenario_history_tab
 )
 
-st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
+st.set_page_config(page_title="Aggregate Production Plan for a Gardening Equipment Manufacturer", layout="wide")
 st.title("원예장비 제조업체 총괄생산계획 수립")
 
 # 1. 기초 파라미터 이니셜라이징
