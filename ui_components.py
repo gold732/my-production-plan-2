@@ -96,16 +96,16 @@ def render_supply_demand_tab(m, utils, demand):
     st.plotly_chart(fig_w, use_container_width=True)
 
 def render_risk_efficiency_tab(m, utils, demand):
-    """2번 탭: 리스크 가이드라인 로직 복구 (버그 수정됨)"""
+    """2번 탭: 리스크 가이드라인 로직 및 시각화 버그 수정 완료"""
     st.subheader("📉 생산 운영 리스크 및 효율성 종합 진단")
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("##### 💰 세부 비용 구조")
         v = st.session_state
-        costs = { "노무비": sum(v['v_c_reg']*m.W[t]() + v['v_c_ot']*m.O[t]() for t in range(1,len(demand)+1)),
-                  "인사비": sum(v['v_c_h']*m.H[t]() + v['v_c_l']*m.L[t]() for t in range(1,len(demand)+1)),
-                  "재고/부재고": sum(v['v_c_inv']*m.I[t]() + v['v_c_back']*m.S[t]() for t in range(1,len(demand)+1)),
-                  "생산/외주": sum(v['v_c_mat']*m.P[t]() + v['v_c_sub']*m.C[t]() for t in range(1,len(demand)+1)) }
+        costs = { "노무비": sum(v['v_c_reg']*float(m.W[t]()) + v['v_c_ot']*float(m.O[t]()) for t in range(1,len(demand)+1)),
+                  "인사비": sum(v['v_c_h']*float(m.H[t]()) + v['v_c_l']*float(m.L[t]()) for t in range(1,len(demand)+1)),
+                  "재고/부재고": sum(v['v_c_inv']*float(m.I[t]()) + v['v_c_back']*float(m.S[t]()) for t in range(1,len(demand)+1)),
+                  "생산/외주": sum(v['v_c_mat']*float(m.P[t]()) + v['v_c_sub']*float(m.C[t]()) for t in range(1,len(demand)+1)) }
         st.plotly_chart(px.pie(names=list(costs.keys()), values=list(costs.values()), hole=0.4), use_container_width=True)
     with c2:
         st.markdown("##### ⚠️ 생산 가동률 변동 추이")
@@ -122,17 +122,17 @@ def render_risk_efficiency_tab(m, utils, demand):
     with c3:
         st.markdown("##### ⏳ 인력 번아웃 리스크 (잔업 잠식률)")
         ot_lim = v.get('ot_limit', 10)
-        # float 캐스팅 및 에러 방지 로직 강화
+        # float 캐스팅 및 리스트 생성 안정화
         burn = []
         for t in range(1, len(demand)+1):
             w_val = float(m.W[t]())
-            if w_val > 0 and ot_lim > 0:
-                val = (float(m.O[t]()) / (ot_lim * w_val)) * 100
-                burn.append(round(val, 2))
+            if w_val > 0.1 and ot_lim > 0:
+                rate = (float(m.O[t]()) / (ot_lim * w_val)) * 100
+                burn.append(round(rate, 2))
             else:
                 burn.append(0.0)
         
-        # range_y와 range_color를 명시하여 데이터가 0일 때도 시각적으로 표시
+        # Y축 범위를 강제하여 데이터가 적어도 눈금 표시
         fig_ot = px.bar(
             x=[f"{t}월" for t in range(1,len(demand)+1)], 
             y=burn, 
@@ -140,7 +140,7 @@ def render_risk_efficiency_tab(m, utils, demand):
             color=burn, 
             color_continuous_scale="OrRd",
             range_color=[0, 100],
-            range_y=[0, 110] 
+            range_y=[0, 110]
         )
         fig_ot.add_hline(y=100, line_dash="dash", line_color="darkred", annotation_text="위험 임계점")
         st.plotly_chart(fig_ot, use_container_width=True)
@@ -150,7 +150,9 @@ def render_risk_efficiency_tab(m, utils, demand):
         unit_c = [((v['v_c_reg']*float(m.W[t]()) + v['v_c_ot']*float(m.O[t]()))/float(m.P[t]()) if m.P[t]() > 0.1 else 0) for t in range(1, len(demand)+1)]
         fig_unit = px.line(x=[f"{t}월" for t in range(1,len(demand)+1)], y=unit_c, markers=True, labels={'y':'단위당 노무 원가','x':'월'})
         fig_unit.update_traces(line=dict(color='#8E44AD', width=3))
-        fig_unit.update_layout(yaxis_range=[0, max(unit_c)*1.2 if any(unit_c) else 100])
+        # Y축 가변 범위 설정
+        if any(unit_c):
+            fig_unit.update_layout(yaxis_range=[0, max(unit_c)*1.2])
         st.plotly_chart(fig_unit, use_container_width=True)
 
 def render_data_master_tab(m, utils, demand):
