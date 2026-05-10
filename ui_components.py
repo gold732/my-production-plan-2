@@ -52,6 +52,17 @@ def render_sidebar():
 
 def render_supply_demand_tab(m, utils, demand):
     """1번 탭: 공급망 통합 흐름 차트"""
+    if st.session_state.get('ai_analysis'):
+        analysis = st.session_state['ai_analysis']
+        st.markdown("### 🤖 AI 전문 컨설턴트 종합 진단 보고서")
+        c_m1, c_m2 = st.columns([1, 4])
+        with c_m1:
+            st.metric("운영 리스크 등급", analysis.get("risk_level", "🟡 주의"))
+            st.metric("최대 병목 월", analysis.get("bottleneck_month", "없음"))
+        with c_m2:
+            st.info(f"**📋 핵심 요약:** {analysis.get('summary', '')}")
+            st.warning(f"**💡 권고사항:** {analysis.get('recommendation', '')}")
+        st.markdown("---")
 
 
     k1, k2, k3, k4 = st.columns(4)
