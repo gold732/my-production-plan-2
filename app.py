@@ -47,7 +47,6 @@ def run_optimization():
             st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
             
             # --- [시나리오 데이터 스냅샷 저장] ---
-            # 사용자의 요청에 따라 모든 비용 파라미터 및 제약 조건을 함께 저장
             timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
             scenario_data = {
                 "시나리오명": f"Scenario_{timestamp}",
@@ -56,7 +55,6 @@ def run_optimization():
                 "평균 가동률(%)": round(sum(st.session_state['utils'])/len(st.session_state['utils']), 1),
                 "총 부재고(ea)": sum(m.S[t]() for t in range(1, len(demand)+1)),
                 "외주 허용": "허용" if enable_sub else "차단",
-                # 임금 및 재고비 등 모든 파라미터 기록
                 "정규임금": st.session_state['v_c_reg'], "초과수당": st.session_state['v_c_ot'],
                 "재고유지비": st.session_state['v_c_inv'], "부재고비용": st.session_state['v_c_back'],
                 "고용비용": st.session_state['v_c_h'], "해고비용": st.session_state['v_c_l'],
@@ -100,11 +98,31 @@ with t5:
     if st.button("🧹 초기화"): st.session_state.messages = []; st.rerun()
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
+    
     if prompt := st.chat_input("의사결정에 필요한 조언을 구하세요"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
+        
         with st.chat_message("assistant"):
+            # 1. 현재 가동 상태 텍스트화
             u_str = ", ".join([f"{v:.1f}%" for v in st.session_state['utils']]) if st.session_state['utils'] else "N/A"
-            ctx = f"가동률:[{u_str}] | 비용:{st.session_state['res'].cost() if st.session_state['res'] else 'N/A'}"
-            res = get_ai_consultant(prompt, ctx)
-            st.markdown(res); st.session_state.messages.append({"role": "assistant", "content": res})
+            current_status = f"현재 결과 가동률:[{u_str}] | 비용:{st.session_state['res'].cost() if st.session_state['res'] else 'N/A'}"
+            
+            # 2. 저장된 시나리오 이력을 AI가 이해하기 쉬운 텍스트 형식으로 변환 (임금, 재고비 등 상세 포함)
+            history_text = ""
+            if st.session_state.get('scenario_history'):
+                history_text = "\n\n[저장된 시나리오 이력 리스트]\n"
+                for s in st.session_state['scenario_history']:
+                    history_text += (
+                        f"- 시나리오명: {s['시나리오명']} (알고리즘: {s['알고리즘']})\n"
+                        f"  ㄴ 결과: 총비용={s['총 비용(k)']}, 평균가동률={s['평균 가동률(%)']}%, 총부재고={s['총 부재고(ea)']}\n"
+                        f"  ㄴ 설정값: 정규임금={s['정규임금']}, 재고비={s['재고유지비']}, 부재고비={s['부재고비용']}, "
+                        f"외주비={s['외주비']}, 최대가동률제약={s['최대허용가동률']}%\n"
+                    )
+            
+            # 3. 통합 컨텍스트 구성 및 AI 호출
+            full_context = current_status + history_text
+            res = get_ai_consultant(prompt, full_context)
+            
+            st.markdown(res)
+            st.session_state.messages.append({"role": "assistant", "content": res})
