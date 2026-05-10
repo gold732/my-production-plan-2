@@ -80,6 +80,20 @@ def render_supply_demand_tab(m, utils, demand):
     fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', hovermode="x unified", title="생산/수요/재고 통합 흐름")
     st.plotly_chart(fig, use_container_width=True)
 
+    st.subheader("👷 인력 최적 배치 및 고용/해고 트렌드")
+    worker_counts = [int(m.W[t]()) for t in range(1, len(demand) + 1)]
+    hired = [int(m.H[t]()) for t in range(1, len(demand) + 1)]
+    fired = [int(m.L[t]()) for t in range(1, len(demand) + 1)]
+    fig_w = go.Figure()
+    fig_w.add_trace(go.Bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=hired, name="신규 고용 (+)", marker_color="#3498DB"))
+    fig_w.add_trace(go.Bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=[-x for x in fired], name="해고 처리 (-)", marker_color="#E67E22"))
+    fig_w.add_trace(go.Scatter(x=[f"{t}월" for t in range(1,len(demand)+1)], y=worker_counts, mode="lines+markers+text", name="총 가동 인원", text=worker_counts, textposition="top center", line=dict(color="#1ABC9C", width=4)))
+    fig_w.update_layout(barmode='overlay', hovermode="x unified")
+    st.plotly_chart(fig_w, use_container_width=True)
+    
+
+
+
 def render_risk_efficiency_tab(m, utils, demand):
     """2번 탭: 리스크 진단 (데이터 추출 안정화 버전)"""
     st.subheader("📉 생산 운영 리스크 및 효율성 종합 진단")
