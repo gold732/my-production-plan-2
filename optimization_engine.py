@@ -1,7 +1,7 @@
 from pyomo.environ import *
 
 def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, wdays, ot_lim, w0, i0, ifinal, use_sub, max_util=100.0, min_inv=0.0):
-    """강의록의 핵심 S&OP 수리 모델 엔진"""
+    """수정된 S&OP 수리 모델: 초과 근무 생산 가동 보장 버전"""
     m = ConcreteModel()
     T = range(1, len(D) + 1); TIME = range(0, len(D) + 1)
     
@@ -22,8 +22,8 @@ def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, 
         # 노동력 균형 제약: Wt = Wt-1 + Ht - Lt
         m.c.add(m.W[t] == m.W[t-1] + m.H[t] - m.L[t])
         
-        # 생산 능력 및 초과근무 제약
-        cap_reg = (1/stime) * 8 * wdays * m.W[t]
+        # 생산 능력 및 초과근무 제약 (가동률 파라미터를 정규 캐파에 통합 적용)
+        cap_reg = (max_util / 100.0) * (1/stime) * 8 * wdays * m.W[t]
         m.c.add(m.P[t] <= cap_reg + (1/stime)*m.O[t]) 
         m.c.add(m.O[t] <= ot_lim * m.W[t])
         
@@ -32,8 +32,7 @@ def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, 
         
         if not use_sub: m.c.add(m.C[t] == 0)
         
-        # [안전 가드] 최대 허용 가동률 및 최소 유지 재고 제약
-        m.c.add(m.P[t] * stime <= (max_util / 100.0) * 8 * wdays * m.W[t])
+        # 최소 유지 재고 제약
         m.c.add(m.I[t] >= min_inv)
 
     # 기말 목표치 제약
