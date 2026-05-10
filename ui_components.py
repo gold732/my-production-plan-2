@@ -51,7 +51,7 @@ def render_sidebar():
     return demand, enable_sub, std_time, working_days, ot_limit
 
 def render_supply_demand_tab(m, utils, demand):
-    """1번 탭: 공급망 통합 흐름 및 인력 현황 그래프 부활"""
+    """1번 탭: 공급망 통합 흐름 차트"""
     if st.session_state.get('ai_analysis'):
         analysis = st.session_state['ai_analysis']
         st.markdown("### 🤖 AI 전문 컨설턴트 종합 진단 보고서")
@@ -71,47 +71,34 @@ def render_supply_demand_tab(m, utils, demand):
     k3.metric("인력 고용/해고", f"+{sum(m.H[t]() for t in range(1,len(demand)+1)):.0f} / -{sum(m.L[t]() for t in range(1,len(demand)+1)):.0f}명")
     k4.metric("총 부재고", f"{sum(m.S[t]() for t in range(1,len(demand)+1)):,.0f}ea")
 
-    st.subheader("📊 생산/수요/재고 통합 흐름")
     fig = go.Figure()
     fig.add_trace(go.Bar(x=list(range(1,len(demand)+1)), y=[m.P[t]() for t in range(1,len(demand)+1)], name="자체 생산", marker_color='royalblue'))
     fig.add_trace(go.Bar(x=list(range(1,len(demand)+1)), y=[m.C[t]() for t in range(1,len(demand)+1)], name="외주 하청", marker_color='lightslategray'))
     fig.add_trace(go.Bar(x=list(range(1,len(demand)+1)), y=[m.S[t]() for t in range(1,len(demand)+1)], name="부재고", marker_color='crimson', opacity=0.8))
     fig.add_trace(go.Scatter(x=list(range(1,len(demand)+1)), y=demand, name="예상 수요", line=dict(color='darkorange', dash='dash')))
     fig.add_trace(go.Scatter(x=list(range(1,len(demand)+1)), y=[m.I[t]() for t in range(1,len(demand)+1)], name="재고 수준", yaxis="y2", line=dict(color='green', width=2.5)))
-    min_i = st.session_state.get('min_inv', 0.0)
-    if min_i > 0:
-        fig.add_hline(y=min_i, line_dash="dot", line_color="#27AE60", annotation_text="최소 재고 가이드", yref="y2")
-    fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', hovermode="x unified")
+    fig.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='stack', hovermode="x unified", title="생산/수요/재고 통합 흐름")
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- [사용자 요청: 인력 현황 그래프 부활] ---
-    st.subheader("👷 인력 최적 배치 및 고용/해고 트렌드")
-    worker_counts = [int(m.W[t]()) for t in range(1, len(demand) + 1)]
-    hired = [int(m.H[t]()) for t in range(1, len(demand) + 1)]
-    fired = [int(m.L[t]()) for t in range(1, len(demand) + 1)]
-    fig_w = go.Figure()
-    fig_w.add_trace(go.Bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=hired, name="신규 고용 (+)", marker_color="#3498DB"))
-    fig_w.add_trace(go.Bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=[-x for x in fired], name="해고 처리 (-)", marker_color="#E67E22"))
-    fig_w.add_trace(go.Scatter(x=[f"{t}월" for t in range(1,len(demand)+1)], y=worker_counts, mode="lines+markers+text", name="총 가동 인원", text=worker_counts, textposition="top center", line=dict(color="#1ABC9C", width=4)))
-    fig_w.update_layout(barmode='overlay', hovermode="x unified")
-    st.plotly_chart(fig_w, use_container_width=True)
-
 def render_risk_efficiency_tab(m, utils, demand):
-    """2번 탭: 리스크 진단 (번아웃 툴팁 간소화 버전)"""
+    """2번 탭: 리스크 진단 (데이터 추출 안정화 버전)"""
     st.subheader("📉 생산 운영 리스크 및 효율성 종합 진단")
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("##### 💰 세부 비용 구조")
         v = st.session_state
-        costs = { "노무비": sum(v['v_c_reg']*m.W[t]() + v['v_c_ot']*m.O[t]() for t in range(1,len(demand)+1)),
-                  "인사비": sum(v['v_c_h']*m.H[t]() + v['v_c_l']*m.L[t]() for t in range(1,len(demand)+1)),
-                  "재고/부재고": sum(v['v_c_inv']*m.I[t]() + v['v_c_back']*m.S[t]() for t in range(1,len(demand)+1)),
-                  "생산/외주": sum(v['v_c_mat']*m.P[t]() + v['v_c_sub']*m.C[t]() for t in range(1,len(demand)+1)) }
+        costs = { 
+            "노무비": sum(v['v_c_reg']*float(value(m.W[t])) + v['v_c_ot']*float(value(m.O[t])) for t in range(1,len(demand)+1)),
+            "인사비": sum(v['v_c_h']*float(value(m.H[t])) + v['v_c_l']*float(value(m.L[t])) for t in range(1,len(demand)+1)),
+            "재고/부재고": sum(v['v_c_inv']*float(value(m.I[t])) + v['v_c_back']*float(value(m.S[t])) for t in range(1,len(demand)+1)),
+            "생산/외주": sum(v['v_c_mat']*float(value(m.P[t])) + v['v_c_sub']*float(value(m.C[t])) for t in range(1,len(demand)+1)) 
+        }
         st.plotly_chart(px.pie(names=list(costs.keys()), values=list(costs.values()), hole=0.4), use_container_width=True)
     with c2:
         st.markdown("##### ⚠️ 생산 가동률 변동 추이")
         fig_u = px.area(x=[f"{t}월" for t in range(1,len(demand)+1)], y=utils, markers=True, labels={'y':'가동률 (%)','x':'월'})
         fig_u.add_hline(y=100, line_dash="solid", line_color="darkred", annotation_text="절대 한계선 (100%)")
+        fig_u.update_layout(yaxis_range=[0, 110])
         st.plotly_chart(fig_u, use_container_width=True)
 
     st.markdown("---")
@@ -119,30 +106,58 @@ def render_risk_efficiency_tab(m, utils, demand):
     with c3:
         st.markdown("##### ⏳ 인력 번아웃 리스크 (잔업 잠식률)")
         ot_lim = v.get('ot_limit', 10)
-        burn = [((m.O[t]() / (ot_lim * m.W[t]())) * 100 if m.W[t]() > 0 and ot_lim > 0 else 0) for t in range(1, len(demand)+1)]
-        fig_ot = px.bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=burn, labels={'y':'한도 대비 잠식률 (%)','x':'월'}, color=burn, color_continuous_scale="OrRd")
+        burn = []
+        for t in range(1, len(demand)+1):
+            w_val = float(value(m.W[t]) or 0)
+            ot_val = float(value(m.O[t]) or 0)
+            if w_val > 0.1 and ot_lim > 0:
+                rate = (ot_val / (ot_lim * w_val)) * 100
+                burn.append(round(rate, 2))
+            else:
+                burn.append(0.0)
+        
+        fig_ot = px.bar(
+            x=[f"{t}월" for t in range(1,len(demand)+1)], 
+            y=burn, 
+            text=[f"{b}%" for b in burn],
+            labels={'y':'한도 대비 잠식률 (%)','x':'월'}, 
+            color=burn, 
+            color_continuous_scale="Reds",
+            range_color=[0, 100]
+        )
+        fig_ot.update_traces(textposition='outside')
         fig_ot.add_hline(y=100, line_dash="dash", line_color="darkred", annotation_text="위험 임계점")
-        # 툴팁에서 잠식률 수치만 나오도록 최적화
-        fig_ot.update_traces(hovertemplate="잠식률: %{y}%<extra></extra>")
+        fig_ot.update_layout(yaxis_range=[0, 125])
         st.plotly_chart(fig_ot, use_container_width=True)
+        
     with c4:
         st.markdown("##### 💸 단위 노무비 효율성 (천원/ea)")
-        unit_c = [((v['v_c_reg']*m.W[t]() + v['v_c_ot']*m.O[t]())/m.P[t]() if m.P[t]() > 0 else 0) for t in range(1, len(demand)+1)]
+        unit_c = []
+        for t in range(1, len(demand)+1):
+            p_val = float(value(m.P[t]) or 0)
+            if p_val > 0.1:
+                cost = (v['v_c_reg']*float(value(m.W[t])) + v['v_c_ot']*float(value(m.O[t]))) / p_val
+                unit_c.append(cost)
+            else:
+                unit_c.append(0)
+        
         fig_unit = px.line(x=[f"{t}월" for t in range(1,len(demand)+1)], y=unit_c, markers=True, labels={'y':'단위당 노무 원가','x':'월'})
         fig_unit.update_traces(line=dict(color='#8E44AD', width=3))
         st.plotly_chart(fig_unit, use_container_width=True)
 
 def render_data_master_tab(m, utils, demand):
-    """3번 탭: 데이터 명세"""
+    """3번 탭: 원본 데이터 명세"""
     st.subheader("📋 총괄생산계획 정밀 데이터 명세 (Raw Data)")
     ds = []
     for t in range(1, len(demand) + 1):
-        ds.append({ "월": f"{t}월", "예상수요": demand[t-1], "자체생산": m.P[t](), "외주하청": m.C[t](), 
-                    "인력수": m.W[t](), "연장근로(Hr)": m.O[t](), "재고량": m.I[t](), "부재고": m.S[t](), "가동률": f"{utils[t-1]:.1f}%" })
+        ds.append({ 
+            "월": f"{t}월", "예상수요": demand[t-1], "자체생산": m.P[t](), "외주하청": m.C[t](), 
+            "인력수": m.W[t](), "연장근로(Hr)": m.O[t](), "재고량": m.I[t](), "부재고": m.S[t](), "가동률": f"{utils[t-1]:.1f}%" 
+        })
     st.dataframe(pd.DataFrame(ds).set_index("월"), use_container_width=True)
 
 def render_scenario_history_tab():
-    """4번 탭: 시나리오 이력 (누락되어 ImportError를 유발했던 함수 복구)"""
+    """4번 탭: 시나리오 이력 및 이름 수정 기능"""
     st.subheader("📜 최적화 시나리오 수행 이력")
     if not st.session_state.get('scenario_history'):
         st.info("아직 기록된 시나리오가 없습니다.")
