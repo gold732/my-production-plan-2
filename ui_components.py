@@ -116,6 +116,7 @@ def render_risk_efficiency_tab(m, utils, demand):
     c3, c4 = st.columns(2)
     with c3:
         st.markdown("##### ⏳ 인력 번아웃 리스크 (잔업 잠식률)")
+        v = st.session_state
         ot_lim = v.get('ot_limit', 10)
         burn = []
         for t in range(1, len(demand)+1):
