@@ -125,6 +125,7 @@ def render_risk_efficiency_tab(m, utils, demand):
             color_continuous_scale="Reds",
             range_color=[0, 100]
         )
+        fig_ot.update_traces(hovertemplate="잠식률: %{y}%<extra></extra>")
         fig_ot.update_traces(textposition='outside')
         fig_ot.add_hline(y=100, line_dash="dash", line_color="darkred", annotation_text="위험 임계점")
         fig_ot.update_layout(yaxis_range=[0, 125])
