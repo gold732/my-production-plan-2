@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime
 
 def render_sidebar():
     """전문 용어 및 단위가 복구된 마스터 제어판"""
@@ -141,28 +140,34 @@ def render_data_master_tab(m, utils, demand):
     st.dataframe(pd.DataFrame(ds).set_index("월"), use_container_width=True)
 
 def render_scenario_history_tab():
-    """신규 추가: 시나리오 비교 및 이력 관리 탭"""
+    """시나리오 이름 수정 기능 및 전체 파라미터 저장 확인용 탭"""
     st.subheader("📜 최적화 시나리오 수행 이력")
     
     if not st.session_state.get('scenario_history'):
-        st.info("아직 기록된 시나리오가 없습니다. '생산계획 수립 실행' 버튼을 눌러 첫 번째 시나리오를 생성하세요.")
+        st.info("아직 기록된 시나리오가 없습니다.")
         return
 
-    # 이력 데이터프레임 변환
-    history_df = pd.DataFrame(st.session_state['scenario_history'])
-    
-    # 주요 지표 강조를 위한 스타일링 및 표시
-    st.dataframe(history_df, use_container_width=True)
+    # 1. 이름 수정 기능
+    with st.expander("📝 시나리오 이름 수정하기"):
+        history = st.session_state['scenario_history']
+        names = [s['시나리오명'] for s in history]
+        target_name = st.selectbox("수정할 시나리오 선택", names)
+        new_name = st.text_input("새로운 이름 입력", value=target_name)
+        if st.button("이름 업데이트"):
+            for s in history:
+                if s['시나리오명'] == target_name:
+                    s['시나리오명'] = new_name
+                    st.success(f"이름이 '{new_name}'으로 변경되었습니다.")
+                    st.rerun()
 
-    c1, c2 = st.columns([1, 5])
-    with c1:
-        if st.button("🗑️ 모든 이력 삭제", type="secondary"):
-            st.session_state['scenario_history'] = []
-            st.rerun()
+    # 2. 이력 테이블 표시 (요약 지표 위주로 필터링하여 출력)
+    full_df = pd.DataFrame(st.session_state['scenario_history'])
+    display_cols = ["시나리오명", "알고리즘", "총 비용(k)", "평균 가동률(%)", "총 부재고(ea)", "외주 허용"]
+    st.dataframe(full_df[display_cols], use_container_width=True)
+
+    # 3. 비용 비교 차트
+    st.plotly_chart(px.bar(full_df, x="시나리오명", y="총 비용(k)", color="알고리즘", title="시나리오별 비용 비교"), use_container_width=True)
     
-    st.markdown("---")
-    st.subheader("📈 시나리오별 총 비용 비교")
-    fig_comp = px.bar(history_df, x="시나리오명", y="총 비용(k)", color="알고리즘", 
-                      text="총 비용(k)", title="시나리오별 운영 비용 추이")
-    fig_comp.update_traces(texttemplate='%{text:,.0f}k', textposition='outside')
-    st.plotly_chart(fig_comp, use_container_width=True)
+    if st.button("🗑️ 모든 이력 삭제"):
+        st.session_state['scenario_history'] = []
+        st.rerun()
