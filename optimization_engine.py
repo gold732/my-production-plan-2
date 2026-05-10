@@ -1,7 +1,7 @@
 from pyomo.environ import *
 
-def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, wdays, ot_lim, w0, i0, ifinal, use_sub, max_util=100.0, min_inv=0.0, max_cost=99999999.0):
-    """강의록의 핵심 S&OP 수리 모델에 가동률/재고/비용 가드를 결합한 엔진"""
+def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, wdays, ot_lim, w0, i0, ifinal, use_sub, max_util=100.0, min_inv=0.0):
+    """강의록의 핵심 S&OP 수리 모델 엔진"""
     m = ConcreteModel()
     T = range(1, len(D) + 1); TIME = range(0, len(D) + 1)
     
@@ -39,8 +39,5 @@ def solve_production_plan(D, domain, reg, ot, h, l, inv, back, mat, sub, stime, 
     # 기말 목표치 제약
     m.c.add(m.I[len(D)] >= ifinal); m.c.add(m.S[len(D)] == 0)
     
-    # [안전 가드] 총 예산 한도 제약
-    m.c.add(m.cost <= max_cost)
-
     result = SolverFactory('glpk').solve(m)
     return m, result
