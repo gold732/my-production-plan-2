@@ -81,7 +81,7 @@ def render_supply_demand_tab(m, utils, demand):
     st.plotly_chart(fig, use_container_width=True)
 
 def render_risk_efficiency_tab(m, utils, demand):
-    """2번 탭: 리스크 진단 (인력 현황 그래프 복구 및 툴팁 최적화)"""
+    """2번 탭: 리스크 진단 (원래 코드 형식 복구 및 툴팁 간소화)"""
     st.subheader("📉 생산 운영 리스크 및 효율성 종합 진단")
     v = st.session_state
     T = range(1, len(demand) + 1)
@@ -101,8 +101,7 @@ def render_risk_efficiency_tab(m, utils, demand):
             "월": f"{t}월",
             "가동률": utils[i],
             "번아웃_잠식률": round(burnout_rate, 2),
-            "단위_노무비": round(unit_labor_cost, 2),
-            "인력수": w_val
+            "단위_노무비": round(unit_labor_cost, 2)
         })
     df = pd.DataFrame(plot_data)
 
@@ -134,7 +133,7 @@ def render_risk_efficiency_tab(m, utils, demand):
         )
         fig_ot.update_traces(
             textposition='outside',
-            hovertemplate="잠식률: %{y}%<extra></extra>"  # 툴팁에서 잠식률만 표시하도록 수정
+            hovertemplate="잠식률: %{y}%<extra></extra>"
         )
         fig_ot.add_hline(y=100, line_dash="dash", line_color="darkred", annotation_text="위험 임계점")
         fig_ot.update_layout(yaxis_range=[0, 125])
@@ -144,23 +143,6 @@ def render_risk_efficiency_tab(m, utils, demand):
         fig_unit = px.line(df, x="월", y="단위_노무비", markers=True, labels={'단위_노무비':'단위당 노무 원가'})
         fig_unit.update_traces(line=dict(color='#8E44AD', width=3))
         st.plotly_chart(fig_unit, use_container_width=True)
-
-    # --- 복구된 월별 인력 운영 현황 그래프 ---
-    st.markdown("---")
-    st.markdown("##### 👥 월별 인력 수급 및 변동 현황 (Workforce Status)")
-    fig_w = go.Figure()
-    fig_w.add_trace(go.Bar(x=df["월"], y=[value(m.H[t]) for t in T], name="신규 고용 (+)", marker_color='lightgreen'))
-    fig_w.add_trace(go.Bar(x=df["월"], y=[-value(m.L[t]) for t in T], name="인력 해고 (-)", marker_color='salmon'))
-    fig_w.add_trace(go.Scatter(x=df["월"], y=df["인력수"], name="총 가용 인력", line=dict(color='#2C3E50', width=4), yaxis="y2"))
-    fig_w.update_layout(
-        yaxis=dict(title="고용/해고 인원 (명)"),
-        yaxis2=dict(title="총 가용 인력 (명)", overlaying='y', side='right', range=[0, df["인력수"].max()*1.2]),
-        barmode='relative',
-        title="월별 인적 자원 변동 추이",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    st.plotly_chart(fig_w, use_container_width=True)
 
 def render_data_master_tab(m, utils, demand):
     """3번 탭: 원본 데이터 명세"""
