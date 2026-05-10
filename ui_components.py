@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from datetime import datetime
 
 def render_sidebar():
     """전문 용어 및 단위가 복구된 마스터 제어판"""
@@ -95,7 +96,7 @@ def render_supply_demand_tab(m, utils, demand):
     st.plotly_chart(fig_w, use_container_width=True)
 
 def render_risk_efficiency_tab(m, utils, demand):
-    """2번 탭: 리스크 가이드라인 로직 복구"""
+    """2번 탭: 리스크 가이드라인 로직 복구 (버그 수정됨)"""
     st.subheader("📉 생산 운영 리스크 및 효율성 종합 진단")
     c1, c2 = st.columns(2)
     with c1:
@@ -113,6 +114,7 @@ def render_risk_efficiency_tab(m, utils, demand):
         max_limit = st.session_state.get('max_util', 100)
         if max_limit < 100:
             fig_u.add_hline(y=max_limit, line_dash="dot", line_color="orange", annotation_text="설정 상한")
+        fig_u.update_layout(yaxis_range=[0, max(110, max(utils)+10)])
         st.plotly_chart(fig_u, use_container_width=True)
 
     st.markdown("---")
@@ -120,15 +122,35 @@ def render_risk_efficiency_tab(m, utils, demand):
     with c3:
         st.markdown("##### ⏳ 인력 번아웃 리스크 (잔업 잠식률)")
         ot_lim = v.get('ot_limit', 10)
-        burn = [((m.O[t]() / (ot_lim * m.W[t]())) * 100 if m.W[t]() > 0 and ot_lim > 0 else 0) for t in range(1, len(demand)+1)]
-        fig_ot = px.bar(x=[f"{t}월" for t in range(1,len(demand)+1)], y=burn, labels={'y':'한도 대비 잠식률 (%)','x':'월'}, color=burn, color_continuous_scale="OrRd")
+        # float 캐스팅 및 에러 방지 로직 강화
+        burn = []
+        for t in range(1, len(demand)+1):
+            w_val = float(m.W[t]())
+            if w_val > 0 and ot_lim > 0:
+                val = (float(m.O[t]()) / (ot_lim * w_val)) * 100
+                burn.append(round(val, 2))
+            else:
+                burn.append(0.0)
+        
+        # range_y와 range_color를 명시하여 데이터가 0일 때도 시각적으로 표시
+        fig_ot = px.bar(
+            x=[f"{t}월" for t in range(1,len(demand)+1)], 
+            y=burn, 
+            labels={'y':'한도 대비 잠식률 (%)','x':'월'}, 
+            color=burn, 
+            color_continuous_scale="OrRd",
+            range_color=[0, 100],
+            range_y=[0, 110] 
+        )
         fig_ot.add_hline(y=100, line_dash="dash", line_color="darkred", annotation_text="위험 임계점")
         st.plotly_chart(fig_ot, use_container_width=True)
+        
     with c4:
         st.markdown("##### 💸 단위 노무비 효율성 (천원/ea)")
-        unit_c = [((v['v_c_reg']*m.W[t]() + v['v_c_ot']*m.O[t]())/m.P[t]() if m.P[t]() > 0 else 0) for t in range(1, len(demand)+1)]
+        unit_c = [((v['v_c_reg']*float(m.W[t]()) + v['v_c_ot']*float(m.O[t]()))/float(m.P[t]()) if m.P[t]() > 0.1 else 0) for t in range(1, len(demand)+1)]
         fig_unit = px.line(x=[f"{t}월" for t in range(1,len(demand)+1)], y=unit_c, markers=True, labels={'y':'단위당 노무 원가','x':'월'})
         fig_unit.update_traces(line=dict(color='#8E44AD', width=3))
+        fig_unit.update_layout(yaxis_range=[0, max(unit_c)*1.2 if any(unit_c) else 100])
         st.plotly_chart(fig_unit, use_container_width=True)
 
 def render_data_master_tab(m, utils, demand):
@@ -140,14 +162,12 @@ def render_data_master_tab(m, utils, demand):
     st.dataframe(pd.DataFrame(ds).set_index("월"), use_container_width=True)
 
 def render_scenario_history_tab():
-    """시나리오 이름 수정 기능 및 전체 파라미터 저장 확인용 탭"""
+    """시나리오 이력 관리 탭"""
     st.subheader("📜 최적화 시나리오 수행 이력")
-    
     if not st.session_state.get('scenario_history'):
         st.info("아직 기록된 시나리오가 없습니다.")
         return
 
-    # 1. 이름 수정 기능
     with st.expander("📝 시나리오 이름 수정하기"):
         history = st.session_state['scenario_history']
         names = [s['시나리오명'] for s in history]
@@ -157,17 +177,12 @@ def render_scenario_history_tab():
             for s in history:
                 if s['시나리오명'] == target_name:
                     s['시나리오명'] = new_name
-                    st.success(f"이름이 '{new_name}'으로 변경되었습니다.")
                     st.rerun()
 
-    # 2. 이력 테이블 표시 (요약 지표 위주로 필터링하여 출력)
     full_df = pd.DataFrame(st.session_state['scenario_history'])
     display_cols = ["시나리오명", "알고리즘", "총 비용(k)", "평균 가동률(%)", "총 부재고(ea)", "외주 허용"]
     st.dataframe(full_df[display_cols], use_container_width=True)
-
-    # 3. 비용 비교 차트
     st.plotly_chart(px.bar(full_df, x="시나리오명", y="총 비용(k)", color="알고리즘", title="시나리오별 비용 비교"), use_container_width=True)
-    
     if st.button("🗑️ 모든 이력 삭제"):
         st.session_state['scenario_history'] = []
         st.rerun()
