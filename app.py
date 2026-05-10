@@ -17,7 +17,7 @@ st.title("원예장비 제조업체 총괄생산계획 수립")
 param_defaults = {
     'opt_mode': "정수계획법(IP)", 'enable_sub': True, 'std_time': 4.0, 'working_days': 20, 'ot_limit': 10,
     'max_util': 100.0, 'min_inv': 0.0, 'v_c_reg': 640.0, 'v_c_ot': 6.0,
-    'v_c_h': 300.0, 'v_c_l': 500.0, 'v_c_inv': 2.0, 'v_c_back': 5.0, 'v_c_mat': 10.0, 'v_c_sub': 30.0,
+    'v_c_h': 300.0, 'v_c_l': 500.0, 'v_c_inv': 2.0, 'v_c_back': 5.0, 'v_c_mat': 10.0, 'v_c_sub': 25.0,
     'v_w_init': 80.0, 'v_i_init': 1000.0, 'v_i_final': 500.0, 'demand_raw': "1600, 3000, 3200, 3800, 2200, 2200",
     'scenario_history': []
 }
