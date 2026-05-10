@@ -80,7 +80,7 @@ def render_supply_demand_tab(m, utils, demand):
     st.plotly_chart(fig, use_container_width=True)
 
 def render_risk_efficiency_tab(m, utils, demand):
-    """2번 탭: 리스크 진단 (번아웃 그래프 수정본)"""
+    """2번 탭: 리스크 진단 (안정적인 변수 참조 방식으로 수정)"""
     st.subheader("📉 생산 운영 리스크 및 효율성 종합 진단")
     c1, c2 = st.columns(2)
     with c1:
@@ -107,15 +107,17 @@ def render_risk_efficiency_tab(m, utils, demand):
         ot_lim = v.get('ot_limit', 10)
         burn = []
         for t in range(1, len(demand)+1):
-            w_val = float(m.W[t].value) # 명시적 value 참조 및 float 변환
+            # m.W[t].value 대신 m.W[t]() 호출 방식 사용 (안정성 확보)
+            w_val = float(m.W[t]() or 0) 
+            ot_val = float(m.O[t]() or 0)
+            
             if w_val > 0.1 and ot_lim > 0:
                 # (실제 잔업 시간 / 인당 한도 총합) * 100
-                rate = (float(m.O[t].value) / (ot_lim * w_val)) * 100
+                rate = (ot_val / (ot_lim * w_val)) * 100
                 burn.append(round(rate, 2))
             else:
                 burn.append(0.0)
         
-        # Y축 범위를 110으로 고정하여 데이터가 0이더라도 축이 보이도록 설정
         fig_ot = px.bar(
             x=[f"{t}월" for t in range(1,len(demand)+1)], 
             y=burn, 
@@ -130,7 +132,19 @@ def render_risk_efficiency_tab(m, utils, demand):
         
     with c4:
         st.markdown("##### 💸 단위 노무비 효율성 (천원/ea)")
-        unit_c = [((v['v_c_reg']*float(m.W[t].value) + v['v_c_ot']*float(m.O[t].value))/float(m.P[t].value) if m.P[t].value > 0.1 else 0) for t in range(1, len(demand)+1)]
+        # m.Var[t].value 대신 m.Var[t]() 호출 방식 사용
+        unit_c = []
+        for t in range(1, len(demand)+1):
+            p_val = float(m.P[t]() or 0)
+            w_val = float(m.W[t]() or 0)
+            o_val = float(m.O[t]() or 0)
+            
+            if p_val > 0.1:
+                cost_val = (v['v_c_reg'] * w_val + v['v_c_ot'] * o_val) / p_val
+                unit_c.append(cost_val)
+            else:
+                unit_c.append(0.0)
+                
         fig_unit = px.line(x=[f"{t}월" for t in range(1,len(demand)+1)], y=unit_c, markers=True, labels={'y':'단위당 노무 원가','x':'월'})
         fig_unit.update_traces(line=dict(color='#8E44AD', width=3))
         st.plotly_chart(fig_unit, use_container_width=True)
