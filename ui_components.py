@@ -64,7 +64,6 @@ def render_supply_demand_tab(m, utils, demand):
             st.warning(f"**💡 권고사항:** {analysis.get('recommendation', '')}")
         st.markdown("---")
 
-
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("총 운영 비용", f"{m.cost():,.0f}k")
     avg_u = sum(utils)/len(utils)
