@@ -1,11 +1,13 @@
 import streamlit as st
 from pyomo.environ import TerminationCondition, NonNegativeIntegers, NonNegativeReals
+from datetime import datetime
 
 from ai_consultant import get_ai_consultant, get_ai_analysis
 from optimization_engine import solve_production_plan
 from ui_components import (
     render_sidebar, render_supply_demand_tab, 
-    render_risk_efficiency_tab, render_data_master_tab
+    render_risk_efficiency_tab, render_data_master_tab,
+    render_scenario_history_tab # 신규 추가
 )
 
 st.set_page_config(page_title="AI S&OP Control Tower", layout="wide")
@@ -16,7 +18,8 @@ param_defaults = {
     'opt_mode': "정수계획법(IP)", 'enable_sub': True, 'std_time': 4.0, 'working_days': 20, 'ot_limit': 10,
     'max_util': 100.0, 'min_inv': 0.0, 'v_c_reg': 640.0, 'v_c_ot': 6.0,
     'v_c_h': 300.0, 'v_c_l': 500.0, 'v_c_inv': 2.0, 'v_c_back': 5.0, 'v_c_mat': 10.0, 'v_c_sub': 30.0,
-    'v_w_init': 80.0, 'v_i_init': 1000.0, 'v_i_final': 500.0, 'demand_raw': "1600, 3000, 3200, 3800, 2200, 2200"
+    'v_w_init': 80.0, 'v_i_init': 1000.0, 'v_i_final': 500.0, 'demand_raw': "1600, 3000, 3200, 3800, 2200, 2200",
+    'scenario_history': [] # 시나리오 저장을 위한 리스트 초기화
 }
 for k, v in param_defaults.items():
     if k not in st.session_state: st.session_state[k] = v
@@ -43,7 +46,24 @@ def run_optimization():
             st.session_state['res'] = m; st.session_state['success'] = True
             st.session_state['utils'] = [(m.P[t]()*st.session_state['std_time']/(8*st.session_state['working_days']*m.W[t]())*100 if m.W[t]() > 0 else 0) for t in range(1, len(demand)+1)]
             
-            ctx_summary = f"비용:{m.cost():,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
+            # --- [시나리오 이력 저장 로직] ---
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            avg_util = sum(st.session_state['utils']) / len(st.session_state['utils'])
+            total_cost = m.cost()
+            
+            scenario_data = {
+                "시나리오명": f"Case_{timestamp}",
+                "알고리즘": st.session_state['opt_mode'],
+                "총 비용(k)": round(total_cost, 2),
+                "평균 가동률(%)": round(avg_util, 1),
+                "총 부재고(ea)": sum(m.S[t]() for t in range(1, len(demand)+1)),
+                "외주 허용": "YES" if enable_sub else "NO",
+                "수요 합계": sum(demand)
+            }
+            st.session_state['scenario_history'].append(scenario_data)
+            # -------------------------------
+
+            ctx_summary = f"비용:{total_cost:,.0f}, 가동률:{st.session_state['utils']}, 부재고:{sum(m.S[t]() for t in range(1,len(demand)+1))}"
             st.session_state['ai_analysis'] = get_ai_analysis(ctx_summary)
             st.toast("✅ 전략적 생산계획 수립 및 AI 분석 완료!")
         else: 
@@ -54,8 +74,8 @@ def run_optimization():
 if st.session_state.get('trigger_reoptimize'):
     st.session_state['trigger_reoptimize'] = False; run_optimization()
 
-# 3. 4단 전문 탭 UI 배치
-t1, t2, t3, t4 = st.tabs(["📊 공급망 운영", "📉 리스크/효율", "📋 데이터 마스터", "💬 AI 전략 상담방"])
+# 3. 5단 전문 탭 UI 배치 (시나리오 이력 탭 추가)
+t1, t2, t3, t4, t5 = st.tabs(["📊 공급망 운영", "📉 리스크/효율", "📋 데이터 마스터", "📜 시나리오 이력", "💬 AI 전략 상담방"])
 
 with t1:
     if st.button("🚀 생산계획 수립 실행"): run_optimization()
@@ -71,6 +91,9 @@ with t3:
         render_data_master_tab(st.session_state['res'], st.session_state['utils'], demand)
 
 with t4:
+    render_scenario_history_tab()
+
+with t5:
     st.subheader("💬 AI 전략 상담방")
     if st.button("🧹 초기화"): st.session_state.messages = []; st.rerun()
     for msg in st.session_state.messages:
