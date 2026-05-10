@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from datetime import datetime
 
 def render_sidebar():
     """전문 용어 및 단위가 복구된 마스터 제어판"""
@@ -138,3 +139,30 @@ def render_data_master_tab(m, utils, demand):
         ds.append({ "월": f"{t}월", "예상수요": demand[t-1], "자체생산": m.P[t](), "외주하청": m.C[t](), 
                     "인력수": m.W[t](), "연장근로(Hr)": m.O[t](), "재고량": m.I[t](), "부재고": m.S[t](), "가동률": f"{utils[t-1]:.1f}%" })
     st.dataframe(pd.DataFrame(ds).set_index("월"), use_container_width=True)
+
+def render_scenario_history_tab():
+    """신규 추가: 시나리오 비교 및 이력 관리 탭"""
+    st.subheader("📜 최적화 시나리오 수행 이력")
+    
+    if not st.session_state.get('scenario_history'):
+        st.info("아직 기록된 시나리오가 없습니다. '생산계획 수립 실행' 버튼을 눌러 첫 번째 시나리오를 생성하세요.")
+        return
+
+    # 이력 데이터프레임 변환
+    history_df = pd.DataFrame(st.session_state['scenario_history'])
+    
+    # 주요 지표 강조를 위한 스타일링 및 표시
+    st.dataframe(history_df, use_container_width=True)
+
+    c1, c2 = st.columns([1, 5])
+    with c1:
+        if st.button("🗑️ 모든 이력 삭제", type="secondary"):
+            st.session_state['scenario_history'] = []
+            st.rerun()
+    
+    st.markdown("---")
+    st.subheader("📈 시나리오별 총 비용 비교")
+    fig_comp = px.bar(history_df, x="시나리오명", y="총 비용(k)", color="알고리즘", 
+                      text="총 비용(k)", title="시나리오별 운영 비용 추이")
+    fig_comp.update_traces(texttemplate='%{text:,.0f}k', textposition='outside')
+    st.plotly_chart(fig_comp, use_container_width=True)
